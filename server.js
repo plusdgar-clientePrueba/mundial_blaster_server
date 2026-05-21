@@ -115,7 +115,7 @@ app.post('/api/lineas/logout', authMiddleware, async (req, res) => {
   }
 })
 
-// LISTAR LÍNEAS (para el frontend)
+// LISTAR LÍNEAS
 app.get('/api/lineas', authMiddleware, async (req, res) => {
   try {
     const lines = await prisma.lineas_whatsapp.findMany({
@@ -125,6 +125,30 @@ app.get('/api/lineas', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Error listando líneas:', err)
     res.status(500).json({ error: 'Error listando líneas' })
+  }
+})
+
+// CREAR NUEVA LÍNEA
+app.post('/api/lineas', authMiddleware, async (req, res) => {
+  const { phone, nombre, userId } = req.body
+  if (!phone) return res.status(400).json({ error: 'phone required' })
+
+  try {
+    const existing = await prisma.lineas_whatsapp.findUnique({ where: { phone } })
+    if (existing) return res.status(409).json({ error: 'Línea ya existe' })
+
+    const line = await prisma.lineas_whatsapp.create({
+      data: {
+        userId: userId || 'usr_default',
+        phone,
+        nombre: nombre || 'Nueva Línea',
+        status: 'DESCONECTADA'
+      }
+    })
+    res.json({ success: true, line })
+  } catch (err) {
+    console.error('Error creando línea:', err)
+    res.status(500).json({ error: 'Error creando línea' })
   }
 })
 
