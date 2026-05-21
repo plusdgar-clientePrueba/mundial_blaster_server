@@ -115,6 +115,19 @@ app.post('/api/lineas/logout', authMiddleware, async (req, res) => {
   }
 })
 
+// LISTAR LÍNEAS (para el frontend)
+app.get('/api/lineas', authMiddleware, async (req, res) => {
+  try {
+    const lines = await prisma.lineas_whatsapp.findMany({
+      orderBy: { fecha_creacion: 'desc' }
+    })
+    res.json({ lines })
+  } catch (err) {
+    console.error('Error listando líneas:', err)
+    res.status(500).json({ error: 'Error listando líneas' })
+  }
+})
+
 server.listen(PORT, () => console.log(`🚀 Mundial Blaster en puerto ${PORT}`))
 
 process.on('uncaughtException', (err) => console.error('🔥 Uncaught:', err))
