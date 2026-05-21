@@ -18,13 +18,15 @@ const io = new Server(server, {
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
-const LICENSE_PUBLIC_KEY = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArPfXmFNNzOR7bxsPpJ6V
+const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArPfXmFNNzOR7bxsPpJ6V
 BdovK3uX6+GVSPcKVZfSJypeJ4PfSWea7ZWi2GzMIaNmQE1yF5McGzbq38NDl1zA
 Y9Odn9a9Yol0WRgpo2/C7mMqQlwVzt8yvgG6iWX04Kqw2/ZKESc495jec5AErzBc
 kXXXxzGtfyUAzkHeg0Da3CtbPwtBC4TR1QwxT6FE08+yxbdqJzCtW+Sp8jGFmwdX
 Zt2U3xmqghpABkD67W4EKAO4RAsHXKrBHCf49QEprQIf0r5csnhVzQ9ZNiM64NLI
 HJIeR639aAKAyWeir0j4UUp9VAuEKnzMxz+ERtQ5PdDgVHKQnK/618Qxq7b7m3bc
-JwIDAQAB`;
+JwIDAQAB
+-----END PUBLIC KEY-----`;
 
 function validateLicense(token) {
   try {
@@ -256,9 +258,8 @@ async function initDatabase() {
 }
 
 // Al final, antes de server.listen
-initDatabase().then(() => {
-  server.listen(PORT, () => console.log(`🚀 Mundial Blaster en puerto ${PORT}`))
-})
+server.listen(PORT, () => console.log(`🚀 Mundial Blaster en puerto ${PORT}`))
+
 
 process.on('uncaughtException', (err) => console.error('🔥 Uncaught:', err))
 process.on('unhandledRejection', (reason) => console.error('🔥 Unhandled:', reason))
