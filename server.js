@@ -260,7 +260,5 @@ initDatabase().then(() => {
   server.listen(PORT, () => console.log(`🚀 Mundial Blaster en puerto ${PORT}`))
 })
 
-server.listen(PORT, () => console.log(`🚀 Mundial Blaster en puerto ${PORT}`))
-
 process.on('uncaughtException', (err) => console.error('🔥 Uncaught:', err))
 process.on('unhandledRejection', (reason) => console.error('🔥 Unhandled:', reason))
