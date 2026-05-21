@@ -1,0 +1,10 @@
+{
+  "name": "mundial-blaster-server",
+  "version": "1.0.0",
+  "dependencies": {
+    "@prisma/client": "^5.0.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.0.0"
+  }
+}
