@@ -18,6 +18,12 @@ model usuarios {
   campaign_logs  campaign_logs[]    @relation("UsuarioCampaignLogs")
 }
 
+model app_config {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
+
 model lineas_whatsapp {
   id             String    @id @default(dbgenerated("('line_'::text || substr(md5((random())::text), 1, 24))")) @db.VarChar(36)
   userId         String    @db.VarChar(36)
