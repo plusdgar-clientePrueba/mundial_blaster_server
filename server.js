@@ -61,42 +61,49 @@ app.post('/api/send-message', authMiddleware, async (req, res) => {
 })
 
 // CAMPAÑA MASIVA
+// CAMPAÑA MASIVA
 app.post('/api/campaign/send', authMiddleware, async (req, res) => {
   try {
     const { lineId, targets, message, delayMin, delayMax, imageUrl } = req.body
     if (!lineId || !targets || !Array.isArray(targets) || !message) {
       return res.status(400).json({ error: 'Faltan datos de campaña' })
     }
+
     const campaignId = `camp_${Date.now()}`
+
+    // 🔥 FIX: Respondemos UNA SOLA VEZ, con el ID de campaña
     res.json({ success: true, campaignId, message: 'Campaña iniciada', total: targets.length })
 
-    // Procesamos en background
-    const results = await waService.sendCampaign(lineId, targets, message, {
+    // Procesamos en background DESPUÉS de responder
+    waService.sendCampaign(lineId, targets, message, {
       delayMin: delayMin || 3000,
       delayMax: delayMax || 8000,
       imageUrl
+    }).then(async (results) => {
+      // Guardar logs en DB
+      try {
+        for (const r of results) {
+          await prisma.campaign_logs.create({
+            data: {
+              campaign_id: campaignId,
+              contact_phone: r.phone,
+              status: r.status,
+              line_id: lineId,
+              owner_id: req.body.userId || 'system',
+              sent_at: r.status === 'sent' ? new Date() : null
+            }
+          }).catch(() => {})
+        }
+      } catch (e) {
+        console.error('Error guardando logs:', e)
+      }
+
+      const sentCount = results.filter(r => r.status === 'sent').length
+      console.log(`🏁 Campaña ${campaignId} finalizada. Enviados: ${sentCount}/${results.length}`)
+    }).catch(err => {
+      console.error('❌ Error procesando campaña en background:', err)
     })
 
-    // Guardar logs en DB
-    try {
-      for (const r of results) {
-        await prisma.campaign_logs.create({
-          data: {
-            campaign_id: campaignId,
-            contact_phone: r.phone,
-            status: r.status,
-            line_id: lineId,
-            owner_id: req.body.userId || 'system',
-            sent_at: r.status === 'sent' ? new Date() : null
-          }
-        }).catch(() => {})
-      }
-    } catch (e) {
-      console.error('Error guardando logs:', e)
-    }
-
-    const sentCount = results.filter(r => r.status === 'sent').length
-    console.log(`🏁 Campaña ${campaignId} finalizada. Enviados: ${sentCount}/${results.length}`)
   } catch (error) {
     console.error('❌ Error campaña:', error)
     res.status(500).json({ error: error.message })
