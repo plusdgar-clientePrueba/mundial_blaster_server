@@ -14,7 +14,7 @@ const logger = pino({ level: 'silent' })
 
 class WAService {
   constructor(prisma, io) {
-    this.prisma = prisma
+     this.prisma = prisma
     this.io = io
     this.clients = new Map()
     this.reconnectTimers = {}
