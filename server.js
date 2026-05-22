@@ -267,7 +267,7 @@ app.post('/api/setup/activate', async (req, res) => {
   res.json({ success: true, tier: license.tier, features: license })
 })
 
-app.get('/api/licence/status', async (req, res) => {
+app.get('/api/license/status', async (req, res) => {
   const config = await prisma.app_config.findUnique({ where: { key: 'license' } })
   if (!config?.value) return res.json({ active: false })
   
