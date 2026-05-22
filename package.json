@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "packageManager": "pnpm@8.15.0",
   "scripts": {
-    "start": "node server.js",
+    "start": "node init-db.js && node server.js",
     "postinstall": "prisma generate",
     "migrate": "prisma migrate deploy"
   },
