@@ -19,7 +19,7 @@ const io = new Server(server, {
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
-// 🔑 CLAVE PÚBLICA (completa con headers PEM)
+// 🔑 CLAVE PÚBLICA (completa)
 const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArPfXmFNNzOR7bxsPpJ6V
 BdovK3uX6+GVSPcKVZfSJypeJ4PfSWea7ZWi2GzMIaNmQE1yF5McGzbq38NDl1zA
@@ -32,8 +32,11 @@ JwIDAQAB
 
 function validateLicense(token) {
   try {
-    return jwt.verify(token, LICENSE_PUBLIC_KEY, { algorithms: ['RS256'] })
+    const decoded = jwt.verify(token, LICENSE_PUBLIC_KEY, { algorithms: ['RS256'] })
+    console.log('✅ Licencia válida:', decoded.tier)
+    return decoded
   } catch (e) {
+    console.error('❌ validateLicense error:', e.message)
     return null
   }
 }
@@ -49,11 +52,11 @@ async function requireLicense(req, res, next) {
   try {
     const config = await prisma.app_config.findUnique({ where: { key: 'license' } })
     if (!config?.value) {
-      return res.status(403).json({ error: 'Licencia no activada. Andá a /setup' })
+      return res.status(403).json({ error: 'Licencia no activada' })
     }
     const license = validateLicense(config.value)
     if (!license) {
-      return res.status(403).json({ error: 'Licencia inválida o expirada' })
+      return res.status(403).json({ error: 'Licencia inválida' })
     }
     req.license = license
     next()
@@ -69,20 +72,69 @@ io.on('connection', () => console.log('🟢 Socket conectado'))
 
 app.get('/', (_, res) => res.json({ status: 'OK', service: 'Mundial Blaster' }))
 
-// ========== ONBOARDING ==========
+// ========== LICENCIA (con logs de debug) ==========
+app.post('/api/setup/activate', async (req, res) => {
+  const { licenseKey } = req.body
+  console.log('🔑 Activando licencia, key length:', licenseKey?.length)
+  
+  if (!licenseKey) return res.status(400).json({ error: 'licenseKey required' })
+
+  const license = validateLicense(licenseKey)
+  if (!license) {
+    console.error('❌ Key inválida al activar')
+    return res.status(400).json({ error: 'Licencia inválida' })
+  }
+
+  await prisma.app_config.upsert({
+    where: { key: 'license' },
+    update: { value: licenseKey },
+    create: { key: 'license', value: licenseKey }
+  })
+
+  console.log('✅ Licencia guardada en DB:', license.tier)
+  res.json({ success: true, tier: license.tier, features: license })
+})
+
+app.get('/api/license/status', async (req, res) => {
+  console.log('📋 Consultando licencia...')
+  const config = await prisma.app_config.findUnique({ where: { key: 'license' } })
+  
+  console.log('📋 Config encontrada:', config ? 'SÍ' : 'NO')
+  if (config) {
+    console.log('📋 Value length:', config.value?.length)
+    console.log('📋 Value primeros 50 chars:', config.value?.substring(0, 50))
+  }
+  
+  if (!config?.value) {
+    console.log('❌ No hay value en config')
+    return res.json({ active: false })
+  }
+  
+  const license = validateLicense(config.value)
+  if (!license) {
+    console.log('❌ validateLicense devolvió null')
+    return res.json({ active: false, invalid: true })
+  }
+  
+  console.log('✅ Licencia activa:', license.tier)
+  res.json({ active: true, tier: license.tier, ...license })
+})
+
+// ========== USUARIO (Onboarding) ==========
 app.get('/api/user', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.usuarios.findFirst()
     res.json({ user })
   } catch (e) {
-    res.status(500).json({ error: 'Error obteniendo usuario' })
+    console.error('Error /api/user:', e)
+    res.json({ user: null })
   }
 })
 
 app.post('/api/user', authMiddleware, async (req, res) => {
   const { nombre, email, avatar } = req.body
   if (!nombre || !email) {
-    return res.status(400).json({ error: 'Nombre y email son requeridos' })
+    return res.status(400).json({ error: 'Nombre y email requeridos' })
   }
   try {
     const existing = await prisma.usuarios.findFirst()
@@ -103,19 +155,7 @@ app.post('/api/user', authMiddleware, async (req, res) => {
   }
 })
 
-// ========== LÍNEAS ==========
-app.post('/api/lineas/connect', authMiddleware, async (req, res) => {
-  const { phone } = req.body
-  if (!phone) return res.status(400).json({ error: 'phone required' })
-  try {
-    const line = await waService.connect(phone)
-    res.json({ message: 'QR generado. Escanea desde el panel.', lineId: line.id })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Fallo al conectar' })
-  }
-})
-
+// ========== LÍNEAS (sin is_archived, sin userId) ==========
 app.get('/api/lineas', authMiddleware, async (req, res) => {
   try {
     const lines = await prisma.lineas_whatsapp.findMany({
@@ -132,12 +172,11 @@ app.post('/api/lineas', authMiddleware, requireLicense, async (req, res) => {
   if (!phone) return res.status(400).json({ error: 'phone required' })
 
   try {
-    // Conteo simple sin filtros problemáticos
     const activeLines = await prisma.lineas_whatsapp.count()
     
     if (activeLines >= req.license.maxLines) {
       return res.status(403).json({ 
-        error: `Límite alcanzado: tu licencia ${req.license.tier} permite ${req.license.maxLines} línea(s).`,
+        error: `Límite alcanzado: ${req.license.maxLines} líneas permitidas`,
         current: activeLines,
         max: req.license.maxLines
       })
@@ -160,6 +199,17 @@ app.post('/api/lineas', authMiddleware, requireLicense, async (req, res) => {
   }
 })
 
+app.post('/api/lineas/connect', authMiddleware, async (req, res) => {
+  const { phone } = req.body
+  if (!phone) return res.status(400).json({ error: 'phone required' })
+  try {
+    const line = await waService.connect(phone)
+    res.json({ message: 'QR generado', lineId: line.id })
+  } catch (err) {
+    res.status(500).json({ error: 'Fallo al conectar' })
+  }
+})
+
 app.post('/api/lineas/logout', authMiddleware, async (req, res) => {
   const { lineId } = req.body
   if (!lineId) return res.status(400).json({ error: 'lineId required' })
@@ -176,25 +226,11 @@ app.post('/api/campaign/send', authMiddleware, async (req, res) => {
   try {
     const { lineId, targets, message, delayMin, delayMax, imageUrl } = req.body
     if (!lineId || !targets || !Array.isArray(targets) || !message) {
-      return res.status(400).json({ error: 'Faltan datos de campaña' })
+      return res.status(400).json({ error: 'Faltan datos' })
     }
 
     const campaignId = `camp_${Date.now()}`
-    
-    // Guardar campaña en historial
-    await prisma.campaigns.create({
-      data: {
-        id: campaignId,
-        name: `Campaña ${new Date().toLocaleDateString()}`,
-        line_id: lineId,
-        message,
-        image_url: imageUrl,
-        total: targets.length,
-        status: 'running'
-      }
-    }).catch(() => {})
-
-    res.json({ success: true, campaignId, message: 'Campaña iniciada', total: targets.length })
+    res.json({ success: true, campaignId, total: targets.length })
 
     waService.sendCampaign(lineId, targets, message, {
       delayMin: delayMin || 3000,
@@ -202,37 +238,22 @@ app.post('/api/campaign/send', authMiddleware, async (req, res) => {
       imageUrl
     }).then(async (results) => {
       const sentCount = results.filter(r => r.status === 'sent').length
-      const failedCount = results.filter(r => r.status === 'failed').length
-      
-      // Actualizar campaña con resultados
-      await prisma.campaigns.update({
-        where: { id: campaignId },
+      await prisma.campaigns.create({
         data: {
+          id: campaignId,
+          name: `Campaña ${new Date().toLocaleDateString()}`,
+          line_id: lineId,
+          message,
+          image_url: imageUrl,
+          total: targets.length,
           sent: sentCount,
-          failed: failedCount,
+          failed: results.length - sentCount,
           status: 'completed',
           finished_at: new Date()
         }
       }).catch(() => {})
-
-      // Guardar logs individuales
-      for (const r of results) {
-        await prisma.campaign_logs.create({
-          data: {
-            campaign_id: campaignId,
-            contact_phone: r.phone,
-            status: r.status,
-            line_id: lineId,
-            owner_id: 'system',
-            sent_at: r.status === 'sent' ? new Date() : null
-          }
-        }).catch(() => {})
-      }
-
-      console.log(`🏁 Campaña ${campaignId} finalizada. Enviados: ${sentCount}/${results.length}`)
-    }).catch(err => {
-      console.error('❌ Error campaña:', err)
-    })
+      console.log(`🏁 Campaña ${campaignId}: ${sentCount}/${results.length}`)
+    }).catch(err => console.error('❌ Error campaña:', err))
 
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -248,33 +269,6 @@ app.get('/api/campaigns', authMiddleware, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Error listando campañas' })
   }
-})
-
-// ========== LICENCIA ==========
-app.post('/api/setup/activate', async (req, res) => {
-  const { licenseKey } = req.body
-  if (!licenseKey) return res.status(400).json({ error: 'licenseKey required' })
-
-  const license = validateLicense(licenseKey)
-  if (!license) return res.status(400).json({ error: 'Licencia inválida' })
-
-  await prisma.app_config.upsert({
-    where: { key: 'license' },
-    update: { value: licenseKey },
-    create: { key: 'license', value: licenseKey }
-  })
-
-  res.json({ success: true, tier: license.tier, features: license })
-})
-
-app.get('/api/license/status', async (req, res) => {
-  const config = await prisma.app_config.findUnique({ where: { key: 'license' } })
-  if (!config?.value) return res.json({ active: false })
-  
-  const license = validateLicense(config.value)
-  if (!license) return res.json({ active: false, invalid: true })
-  
-  res.json({ active: true, tier: license.tier, ...license })
 })
 
 server.listen(PORT, () => console.log(`🚀 Mundial Blaster en puerto ${PORT}`))
