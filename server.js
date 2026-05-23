@@ -390,6 +390,405 @@ app.get('/api/auth/check', async (req, res) => {
   }
 })
 
+// ========== CONTACTOS ==========
+
+app.get('/api/contacts', authOrSecret, async (req, res) => {
+  try {
+    const { search, tag } = req.query
+    const where = {}
+    
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ]
+    }
+    if (tag) {
+      where.tags = { has: tag }
+    }
+    
+    const contacts = await prisma.contacts.findMany({
+      where,
+      orderBy: { createdAt: 'desc' }
+    })
+    res.json({ contacts })
+  } catch (e) {
+    console.error('Error listando contactos:', e)
+    res.status(500).json({ error: 'Error listando contactos' })
+  }
+})
+
+app.post('/api/contacts', authOrSecret, async (req, res) => {
+  const { name, phone, email, company, tags, notes } = req.body
+  if (!name || !phone) return res.status(400).json({ error: 'Nombre y teléfono requeridos' })
+  
+  try {
+    const contact = await prisma.contacts.create({
+      data: {
+        name,
+        phone: phone.replace(/\D/g, ''),
+        email,
+        company,
+        tags: tags || [],
+        notes,
+        source: 'manual'
+      }
+    })
+    res.json({ success: true, contact })
+  } catch (e) {
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Ese teléfono ya existe' })
+    console.error('Error creando contacto:', e)
+    res.status(500).json({ error: 'Error creando contacto' })
+  }
+})
+
+app.patch('/api/contacts/:id', authOrSecret, async (req, res) => {
+  const { id } = req.params
+  const { name, phone, email, company, tags, notes } = req.body
+  
+  try {
+    const contact = await prisma.contacts.update({
+      where: { id },
+      data: { name, phone, email, company, tags, notes }
+    })
+    res.json({ success: true, contact })
+  } catch (e) {
+    console.error('Error actualizando contacto:', e)
+    res.status(500).json({ error: 'Error actualizando contacto' })
+  }
+})
+
+app.delete('/api/contacts', authOrSecret, async (req, res) => {
+  const { ids } = req.body
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'IDs requeridos' })
+  }
+  
+  try {
+    await prisma.contacts.deleteMany({ where: { id: { in: ids } } })
+    res.json({ success: true, deleted: ids.length })
+  } catch (e) {
+    res.status(500).json({ error: 'Error eliminando contactos' })
+  }
+})
+
+// Import CSV
+app.post('/api/contacts/import', authOrSecret, async (req, res) => {
+  const { contacts: importData } = req.body
+  if (!Array.isArray(importData)) return res.status(400).json({ error: 'Array requerido' })
+  
+  let created = 0
+  let errors = 0
+  
+  for (const item of importData) {
+    try {
+      await prisma.contacts.create({
+        data: {
+          name: item.name || 'Sin nombre',
+          phone: item.phone.replace(/\D/g, ''),
+          email: item.email,
+          company: item.company,
+          tags: item.tags || [],
+          source: 'csv'
+        }
+      })
+      created++
+    } catch {
+      errors++
+    }
+  }
+  
+  res.json({ success: true, created, errors })
+})
+
+// ========== TAGS ==========
+// Contar contactos por cada tag
+app.get('/api/tags/stats', authOrSecret, async (req, res) => {
+  try {
+    const tags = await prisma.tags.findMany({ orderBy: { name: 'asc' } })
+    const contacts = await prisma.contacts.findMany({ select: { tags: true } })
+    
+    const stats = tags.map(tag => ({
+      ...tag,
+      count: contacts.filter(c => c.tags.includes(tag.name)).length
+    }))
+    
+    res.json({ tags: stats })
+  } catch (e) {
+    res.status(500).json({ error: 'Error obteniendo stats' })
+  }
+})
+
+app.get('/api/tags', authOrSecret, async (req, res) => {
+  try {
+    const tags = await prisma.tags.findMany({ orderBy: { name: 'asc' } })
+    res.json({ tags })
+  } catch (e) {
+    res.status(500).json({ error: 'Error listando tags' })
+  }
+})
+
+app.post('/api/tags', authOrSecret, async (req, res) => {
+  const { name, color, icon } = req.body
+  if (!name) return res.status(400).json({ error: 'Nombre requerido' })
+  
+  try {
+    const tag = await prisma.tags.create({
+      data: { name: name.toLowerCase().trim(), color: color || '#3B82F6', icon }
+    })
+    res.json({ success: true, tag })
+  } catch (e) {
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Tag ya existe' })
+    res.status(500).json({ error: 'Error creando tag' })
+  }
+})
+
+app.delete('/api/tags/:id', authOrSecret, async (req, res) => {
+  try {
+    await prisma.tags.delete({ where: { id: req.params.id } })
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: 'Error eliminando tag' })
+  }
+})
+
+// ========== REPORTES / CAMPAÑAS HISTÓRICO ==========
+
+app.get('/api/campaigns/report', authOrSecret, async (req, res) => {
+  try {
+    const { period } = req.query // '7d', '30d', 'all'
+    
+    let dateFilter = {}
+    if (period === '7d') {
+      dateFilter = { created_at: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } }
+    } else if (period === '30d') {
+      dateFilter = { created_at: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }
+    }
+    
+    const campaigns = await prisma.campaigns.findMany({
+      where: dateFilter,
+      orderBy: { created_at: 'desc' }
+    })
+    
+    // Stats agregadas
+    const totalSent = campaigns.reduce((sum, c) => sum + (c.sent || 0), 0)
+    const totalFailed = campaigns.reduce((sum, c) => sum + (c.failed || 0), 0)
+    const totalMessages = totalSent + totalFailed
+    const deliveryRate = totalMessages > 0 ? Math.round((totalSent / totalMessages) * 100) : 0
+    
+    // Datos para gráfico por día
+    const dailyData = {}
+    campaigns.forEach(c => {
+      const date = c.created_at.toISOString().split('T')[0]
+      if (!dailyData[date]) dailyData[date] = { sent: 0, failed: 0 }
+      dailyData[date].sent += c.sent || 0
+      dailyData[date].failed += c.failed || 0
+    })
+    
+    const chartData = Object.entries(dailyData)
+      .map(([date, data]) => ({
+
+        date,
+        sent: data.sent,
+        failed: data.failed,
+        total: data.sent + data.failed
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+    
+    res.json({
+      campaigns,
+      stats: {
+        totalCampaigns: campaigns.length,
+        totalSent,
+        totalFailed,
+        totalMessages,
+        deliveryRate,
+        activeNow: campaigns.filter(c => c.status === 'running').length
+      },
+      chartData
+    })
+    
+  } catch (e) {
+    console.error('Error reportes:', e)
+    res.status(500).json({ error: 'Error generando reportes' })
+  }
+})
+
+// Endpoint para detalle de campaña (logs individuales)
+app.get('/api/campaigns/:id/logs', authOrSecret, requireLicense, async (req, res) => {
+
+  try {
+    const logs = await prisma.campaign_logs.findMany({
+      where: { campaign_id: req.params.id },
+      orderBy: { created_at: 'desc' }
+    })
+    res.json({ logs })
+  } catch (e) {
+    res.status(500).json({ error: 'Error obteniendo logs' })
+  }
+})
+
+// Repetir campaña (Pro)
+app.post('/api/campaigns/:id/clone', authOrSecret, requireLicense, async (req, res) => {
+  try {
+    const original = await prisma.campaigns.findUnique({ where: { id: req.params.id } })
+    if (!original) return res.status(404).json({ error: 'Campaña no encontrada' })
+    
+    const newId = `camp_${Date.now()}`
+    
+    await prisma.campaigns.create({
+      data: {
+        id: newId,
+        name: `${original.name} (copia)`,
+        line_id: original.line_id,
+        message: original.message,
+        image_url: original.image_url,
+        total: original.total,
+        status: 'running'
+      }
+    })
+    
+    res.json({ success: true, campaignId: newId })
+  } catch (e) {
+    res.status(500).json({ error: 'Error clonando campaña' })
+  }
+})
+
+
+// ========== TEMPLATES ==========
+
+app.get('/api/templates', authOrSecret, async (req, res) => {
+  try {
+    const { search, category } = req.query
+    const where = {}
+    
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { content: { contains: search, mode: 'insensitive' } },
+      ]
+    }
+    if (category && category !== 'all') {
+      where.category = category
+    }
+    
+    const templates = await prisma.message_templates.findMany({
+      where,
+      orderBy: { usageCount: 'desc' }
+    })
+    res.json({ templates })
+  } catch (e) {
+    console.error('Error templates:', e)
+    res.status(500).json({ error: 'Error listando templates' })
+  }
+})
+
+app.post('/api/templates', authOrSecret, async (req, res) => {
+  const { name, content, category } = req.body
+  if (!name || !content) return res.status(400).json({ error: 'Nombre y contenido requeridos' })
+  
+  // Extraer variables automáticamente: {{variable}}
+  const variables = [...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1])
+  const uniqueVars = [...new Set(variables)]
+  
+  try {
+    const template = await prisma.message_templates.create({
+      data: {
+        name,
+        content,
+        category: category || 'General',
+        variables: uniqueVars
+      }
+    })
+    res.json({ success: true, template })
+  } catch (e) {
+    res.status(500).json({ error: 'Error creando template' })
+  }
+})
+
+app.patch('/api/templates/:id', authOrSecret, async (req, res) => {
+  const { id } = req.params
+  const { name, content, category } = req.body
+  
+  const variables = content ? [...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]) : undefined
+  const uniqueVars = variables ? [...new Set(variables)] : undefined
+  
+  try {
+    const updateData = {}
+    if (name) updateData.name = name
+    if (content) updateData.content = content
+    if (category) updateData.category = category
+    if (uniqueVars) updateData.variables = uniqueVars
+    
+    const template = await prisma.message_templates.update({
+      where: { id },
+      data: updateData
+    })
+    res.json({ success: true, template })
+  } catch (e) {
+    res.status(500).json({ error: 'Error actualizando template' })
+  }
+})
+
+app.delete('/api/templates/:id', authOrSecret, async (req, res) => {
+  try {
+    await prisma.message_templates.delete({ where: { id: req.params.id } })
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: 'Error eliminando template' })
+  }
+})
+
+// Clonar template
+app.post('/api/templates/:id/clone', authOrSecret, async (req, res) => {
+  try {
+    const original = await prisma.message_templates.findUnique({
+      where: { id: req.params.id }
+    })
+    if (!original) return res.status(404).json({ error: 'Template no encontrado' })
+    
+    const clone = await prisma.message_templates.create({
+      data: {
+        name: `${original.name} (copia)`,
+        content: original.content,
+        category: original.category,
+        variables: original.variables,
+        usageCount: 0
+      }
+    })
+    res.json({ success: true, template: clone })
+  } catch (e) {
+    res.status(500).json({ error: 'Error clonando' })
+  }
+})
+
+// Usar template (incrementa contador)
+app.post('/api/templates/:id/use', authOrSecret, async (req, res) => {
+  try {
+    const template = await prisma.message_templates.update({
+      where: { id: req.params.id },
+      data: { usageCount: { increment: 1 } }
+    })
+    res.json({ success: true, template })
+  } catch (e) {
+    res.status(500).json({ error: 'Error usando template' })
+  }
+})
+
+// Categorías únicas
+app.get('/api/templates/categories', authOrSecret, async (req, res) => {
+  try {
+    const templates = await prisma.message_templates.findMany({
+      select: { category: true },
+      distinct: ['category']
+    })
+    res.json({ categories: templates.map(t => t.category) })
+  } catch (e) {
+    res.status(500).json({ error: 'Error' })
+  }
+})
+
 // ========== LÍNEAS ==========
 app.post('/api/lineas/connect', authOrSecret, requireLicense, async (req, res) => {
   const { phone } = req.body
