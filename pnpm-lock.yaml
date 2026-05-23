@@ -11,6 +11,9 @@ dependencies:
   '@whiskeysockets/baileys':
     specifier: ^6.7.22
     version: 6.17.16(eslint@9.39.4)(typescript@6.0.3)
+  bcryptjs:
+    specifier: ^3.0.3
+    version: 3.0.3
   dotenv:
     specifier: ^17.4.2
     version: 17.4.2
@@ -21,7 +24,7 @@ dependencies:
     specifier: ^11.2.0
     version: 11.3.5
   jsonwebtoken:
-    specifier: ^9.0.2
+    specifier: ^9.0.3
     version: 9.0.3
   node-cache:
     specifier: ^5.1.2
@@ -682,6 +685,11 @@ packages:
   /base64id@2.0.0:
     resolution: {integrity: sha512-lGe34o6EHj9y3Kts9R4ZYs/Gr+6N7MCaMlIFA3F1R2O5/m7K06AxfSeO5530PEERE6/WyEg3lsuyw4GHlPZHog==}
     engines: {node: ^4.5.0 || >= 5.9}
+    dev: false
+
+  /bcryptjs@3.0.3:
+    resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
+    hasBin: true
     dev: false
 
   /body-parser@1.20.5:
