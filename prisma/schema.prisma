@@ -7,52 +7,56 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+model usuarios {
+  id                String   @id @default(uuid())
+  nombre            String
+  email             String   @unique
+  password          String   // bcrypt hash
+  avatar            String   @default("avatar1")
+  role              String   @default("admin") // admin | user
+  security_question String?
+  security_answer   String?  // bcrypt hash de la respuesta
+  last_login        DateTime?
+  session_token     String?  @unique
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+}
+
 model app_config {
-  id    String @id @default(cuid())
-  key   String @unique
+  key   String @id
   value String
 }
 
-model usuarios {
-  id         String   @id @default(cuid())
-  nombre     String
-  email      String   @unique
-  avatar     String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-}
-
 model lineas_whatsapp {
-  id             String   @id @default(cuid())
-  phone          String   @unique
-  nombre         String?
-  status         String   @default("DESCONECTADA")
-  userId         String?
-  is_archived    Boolean  @default(false)
-  fecha_creacion DateTime @default(now())
-  chatbot_id     String?
+  id              String   @id @default(uuid())
+  phone           String   @unique
+  nombre          String   @default("Nueva Línea")
+  status          String   @default("DESCONECTADA")
+  fecha_creacion  DateTime @default(now())
 }
 
 model campaigns {
-  id          String   @id @default(cuid())
-  name        String
-  line_id     String
-  message     String
-  image_url   String?
-  total       Int
-  sent        Int      @default(0)
-  failed      Int      @default(0)
-  status      String   @default("running")
-  created_at  DateTime @default(now())
-  finished_at DateTime?
+  id            String    @id
+  name          String
+  line_id       String
+  message       String
+  image_url     String?
+  total         Int       @default(0)
+  sent          Int       @default(0)
+  failed        Int       @default(0)
+  status        String    @default("running")
+  created_at    DateTime  @default(now())
+  finished_at   DateTime?
 }
 
 model campaign_logs {
-  id            Int      @id @default(autoincrement())
+  id            String    @id @default(uuid())
   campaign_id   String
   contact_phone String
   status        String
   line_id       String
   owner_id      String
   sent_at       DateTime?
+  created_at    DateTime  @default(now())
 }
