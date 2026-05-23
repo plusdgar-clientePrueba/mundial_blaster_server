@@ -381,6 +381,15 @@ app.post('/api/user', authOrSecret, async (req, res) => {
   }
 })
 
+app.get('/api/auth/check', async (req, res) => {
+  try {
+    const count = await prisma.usuarios.count()
+    res.json({ hasUser: count > 0 })
+  } catch (e) {
+    res.status(500).json({ error: 'Error verificando usuarios' })
+  }
+})
+
 // ========== LÍNEAS ==========
 app.post('/api/lineas/connect', authOrSecret, requireLicense, async (req, res) => {
   const { phone } = req.body
