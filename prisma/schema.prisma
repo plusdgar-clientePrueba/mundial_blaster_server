@@ -1,62 +1,120 @@
-generator client {
-  provider = "prisma-client-js"
+  generator client {
+    provider = "prisma-client-js"
+  }
+
+  datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+  }
+
+
+  model usuarios {
+    id                String   @id @default(uuid())
+    nombre            String
+    email             String   @unique
+    password          String   // bcrypt hash
+    avatar            String   @default("avatar1")
+    role              String   @default("admin") // admin | user
+    security_question String?
+    security_answer   String?  // bcrypt hash de la respuesta
+    last_login        DateTime?
+    session_token     String?  @unique
+    created_at        DateTime @default(now())
+    updated_at        DateTime @updatedAt
+  }
+
+  model app_config {
+    key   String @id
+    value String
+  }
+
+  model lineas_whatsapp {
+    id              String   @id @default(uuid())
+    phone           String   @unique
+    nombre          String   @default("Nueva Línea")
+    status          String   @default("DESCONECTADA")
+    fecha_creacion  DateTime @default(now())
+  }
+
+  model campaigns {
+    id            String    @id
+    name          String
+    line_id       String
+    message       String
+    image_url     String?
+    total         Int       @default(0)
+    sent          Int       @default(0)
+    failed        Int       @default(0)
+    status        String    @default("running") // running | completed | failed | scheduled
+    created_at    DateTime  @default(now())
+    finished_at   DateTime?
+    
+    
+    @@index([created_at])
+    @@index([status])
+  }
+
+  model scheduled_campaigns {
+  id          String   @id @default(uuid())
+  campaign_id String   @unique
+  execute_at  DateTime
+  status      String   @default("pending") // pending | processing | completed | cancelled
+  createdAt   DateTime @default(now())
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+model campaign_attachments {
+  id          String @id @default(uuid())
+  campaign_id String
+  url         String
+  type        String // image, video, pdf, audio
+  filename    String?
 }
 
+  model campaign_logs {
+    id            String    @id @default(uuid())
+    campaign_id   String
+    contact_phone String
+    status        String
+    line_id       String
+    owner_id      String
+    sent_at       DateTime?
+    created_at    DateTime  @default(now())
+  }
 
-model usuarios {
-  id                String   @id @default(uuid())
-  nombre            String
-  email             String   @unique
-  password          String   // bcrypt hash
-  avatar            String   @default("avatar1")
-  role              String   @default("admin") // admin | user
-  security_question String?
-  security_answer   String?  // bcrypt hash de la respuesta
-  last_login        DateTime?
-  session_token     String?  @unique
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-}
 
-model app_config {
-  key   String @id
-  value String
-}
+  model contacts {
+    id        String   @id @default(uuid())
+    name      String
+    phone     String   @unique
+    email     String?
+    company   String?
+    tags      String[] @default([])
+    notes     String?
+    source    String?  // csv, manual, campaign
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+  }
 
-model lineas_whatsapp {
-  id              String   @id @default(uuid())
-  phone           String   @unique
-  nombre          String   @default("Nueva Línea")
-  status          String   @default("DESCONECTADA")
-  fecha_creacion  DateTime @default(now())
-}
+  model tags {
+    id     String @id @default(uuid())
+    name   String @unique
+    color  String @default("#3B82F6")
+    icon   String?
+  }
 
-model campaigns {
-  id            String    @id
-  name          String
-  line_id       String
-  message       String
-  image_url     String?
-  total         Int       @default(0)
-  sent          Int       @default(0)
-  failed        Int       @default(0)
-  status        String    @default("running")
-  created_at    DateTime  @default(now())
-  finished_at   DateTime?
-}
+  model message_templates {
+    id         String   @id @default(uuid())
+    name       String
+    content    String   // El mensaje con {{spintax}} y {{variables}}
+    category   String   @default("General") // Promociones, Recordatorios, Bienvenida...
+    variables  String[] @default([])       // ["nombre", "empresa"] detectadas auto
+    usageCount Int      @default(0)
+    createdAt  DateTime @default(now())
+  }
 
-model campaign_logs {
-  id            String    @id @default(uuid())
-  campaign_id   String
-  contact_phone String
-  status        String
-  line_id       String
-  owner_id      String
-  sent_at       DateTime?
-  created_at    DateTime  @default(now())
+  model blacklist {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  reason    String?  // "optout", "bounce", "manual"
+  createdAt DateTime @default(now())
 }
