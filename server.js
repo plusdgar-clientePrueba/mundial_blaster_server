@@ -857,11 +857,11 @@ app.post('/api/lineas/logout', authOrSecret, requireLicense, async (req, res) =>
 })
 
 // ========== CAMPAÑAS ==========
-app.post('/api/campaign/send', authOrSecret, requireLicense, async (req, res) => {
+app.post('/api/campaigns/send', authOrSecret, async (req, res) => {
   try {
-    const { lineId, targets, message, delayMin, delayMax, imageUrl } = req.body
-    if (!lineId || !targets || !Array.isArray(targets) || !message) {
-      return res.status(400).json({ error: 'Faltan datos de campaña' })
+    const { lineId, targets, message, imageUrl, delayMin, delayMax, name, schedule } = req.body
+    if (!lineId || !targets?.length || !message) {
+      return res.status(400).json({ error: 'Faltan datos' })
     }
 
     const campaignId = `camp_${Date.now()}`
@@ -869,55 +869,40 @@ app.post('/api/campaign/send', authOrSecret, requireLicense, async (req, res) =>
     await prisma.campaigns.create({
       data: {
         id: campaignId,
-        name: `Campaña ${new Date().toLocaleDateString()}`,
+        name: name || `Campaña ${new Date().toLocaleString('es-AR')}`,
         line_id: lineId,
         message,
-        image_url: imageUrl,
+        image_url: imageUrl || null,
         total: targets.length,
-        status: 'running'
+        sent: 0,
+        failed: 0,
+        status: schedule === 'pending' ? 'pending' : 'running',
+        targets: targets // Prisma guarda JSON automáticamente
       }
-    }).catch(() => {})
-
-    res.json({ success: true, campaignId, message: 'Campaña iniciada', total: targets.length })
-
-    waService.sendCampaign(lineId, targets, message, {
-      delayMin: delayMin || 3000,
-      delayMax: delayMax || 8000,
-      imageUrl
-    }).then(async (results) => {
-      const sentCount = results.filter(r => r.status === 'sent').length
-      const failedCount = results.filter(r => r.status === 'failed').length
-
-      await prisma.campaigns.update({
-        where: { id: campaignId },
-        data: {
-          sent: sentCount,
-          failed: failedCount,
-          status: 'completed',
-          finished_at: new Date()
-        }
-      }).catch(() => {})
-
-      for (const r of results) {
-        await prisma.campaign_logs.create({
-          data: {
-            campaign_id: campaignId,
-            contact_phone: r.phone,
-            status: r.status,
-            line_id: lineId,
-            owner_id: 'system',
-            sent_at: r.status === 'sent' ? new Date() : null
-          }
-        }).catch(() => {})
-      }
-
-      console.log(`🏁 Campaña ${campaignId} finalizada. Enviados: ${sentCount}/${results.length}`)
-    }).catch(err => {
-      console.error('❌ Error campaña:', err)
     })
 
-  } catch (error) {
-    res.status(500).json({ error: error.message })
+    if (schedule === 'pending') {
+      return res.json({
+        success: true,
+        campaignId,
+        status: 'pending',
+        message: 'Campaña guardada. Ejecutala desde Reportes.'
+      })
+    }
+
+    // Ejecutar ahora
+    const results = await waService.sendCampaign(
+      campaignId,
+      lineId,
+      targets,
+      message,
+      { delayMin, delayMax, imageUrl }
+    )
+
+    res.json({ success: true, campaignId, total: targets.length, results })
+  } catch (e) {
+    console.error('Error campaña:', e)
+    res.status(500).json({ error: e.message || 'Error en campaña' })
   }
 })
 

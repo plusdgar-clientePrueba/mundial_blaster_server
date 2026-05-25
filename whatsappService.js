@@ -256,39 +256,83 @@ class WAService {
     }
   }
 
-  async sendCampaign(lineId, targets, message, options = {}) {
-    const { delayMin = 3000, delayMax = 8000, imageUrl = null } = options
-    const results = []
+  async sendCampaign(campaignId, lineId, targets, message, options = {}) {
+  const { delayMin = 3000, delayMax = 8000, imageUrl = null } = options
 
-    for (let i = 0; i < targets.length; i++) {
-      const target = targets[i]
-      try {
-        const personalized = message
-          .replace(/\{\{nombre\}\}/gi, target.name || '')
-          .replace(/\{nombre\}/gi, target.name || '')
-          .replace(/\{\{telefono\}\}/gi, target.phone || '')
-          .replace(/\{telefono\}/gi, target.phone || '')
+  // Marcar como running
+  await this.prisma.campaigns.update({
+    where: { id: campaignId },
+    data: { status: 'running' }
+  }).catch(() => {})
 
-        await this.sendMessage(lineId, target.phone, personalized, {
-          type: imageUrl ? 'image' : 'text',
-          imageUrl
-        })
+  const results = []
 
-        results.push({ phone: target.phone, status: 'sent', index: i })
-        console.log(`✅ ${i + 1}/${targets.length} → ${target.phone}`)
-      } catch (err) {
-        results.push({ phone: target.phone, status: 'failed', error: err.message, index: i })
-        console.error(`❌ ${target.phone}:`, err.message)
-      }
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i]
+    try {
+      const personalized = message
+        .replace(/\{\{nombre\}\}/gi, target.name || '')
+        .replace(/\{nombre\}/gi, target.name || '')
+        .replace(/\{\{telefono\}\}/gi, target.phone || '')
+        .replace(/\{telefono\}/gi, target.phone || '')
 
-      if (i < targets.length - 1) {
-        const delay = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
-        await new Promise(r => setTimeout(r, delay))
-      }
+      await this.sendMessage(lineId, target.phone, personalized, {
+        type: imageUrl ? 'image' : 'text',
+        imageUrl
+      })
+
+      results.push({ phone: target.phone, status: 'sent', index: i })
+
+      // Incrementar sent
+      await this.prisma.campaigns.update({
+        where: { id: campaignId },
+        data: { sent: { increment: 1 } }
+      }).catch(() => {})
+
+      // Log individual
+      await this.prisma.campaign_logs.create({
+        data: {
+          campaign_id: campaignId,
+          contact_phone: target.phone,
+          status: 'sent'
+        }
+      }).catch(() => {})
+
+      console.log(`✅ ${i + 1}/${targets.length} → ${target.phone}`)
+    } catch (err) {
+      results.push({ phone: target.phone, status: 'failed', error: err.message, index: i })
+
+      await this.prisma.campaigns.update({
+        where: { id: campaignId },
+        data: { failed: { increment: 1 } }
+      }).catch(() => {})
+
+      await this.prisma.campaign_logs.create({
+        data: {
+          campaign_id: campaignId,
+          contact_phone: target.phone,
+          status: 'failed',
+          error: err.message?.slice(0, 200)
+        }
+      }).catch(() => {})
+
+      console.error(`❌ ${target.phone}:`, err.message)
     }
 
-    return results
+    if (i < targets.length - 1) {
+      const delay = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
+      await new Promise(r => setTimeout(r, delay))
+    }
   }
+
+  // Finalizar
+  await this.prisma.campaigns.update({
+    where: { id: campaignId },
+    data: { status: 'completed', finished_at: new Date() }
+  }).catch(() => {})
+
+  return results
+}
 
   async logout(lineId) {
     // Limpiar timers/intervals antes de todo
