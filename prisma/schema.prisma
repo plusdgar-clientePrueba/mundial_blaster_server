@@ -44,6 +44,7 @@
     image_url     String?
     total         Int       @default(0)
     sent          Int       @default(0)
+    targets       Json?
     failed        Int       @default(0)
     status        String    @default("running") // running | completed | failed | scheduled
     created_at    DateTime  @default(now())
