@@ -640,13 +640,12 @@ app.get('/api/campaigns/:id/logs', authOrSecret, requireLicense, async (req, res
 })
 
 // Repetir campaña (Pro)
-app.post('/api/campaigns/:id/clone', authOrSecret, requireLicense, async (req, res) => {
+app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
   try {
     const original = await prisma.campaigns.findUnique({ where: { id: req.params.id } })
     if (!original) return res.status(404).json({ error: 'Campaña no encontrada' })
-    
+
     const newId = `camp_${Date.now()}`
-    
     await prisma.campaigns.create({
       data: {
         id: newId,
@@ -655,16 +654,31 @@ app.post('/api/campaigns/:id/clone', authOrSecret, requireLicense, async (req, r
         message: original.message,
         image_url: original.image_url,
         total: original.total,
-        status: 'running'
+        sent: 0,
+        failed: 0,
+        status: 'pending',
+        targets: original.targets
       }
     })
-    
-    res.json({ success: true, campaignId: newId })
+
+    // Devolvemos los datos para que el frontend cargue el editor
+    res.json({ 
+      success: true, 
+      campaign: {
+        id: newId,
+        name: `${original.name} (copia)`,
+        line_id: original.line_id,
+        message: original.message,
+        image_url: original.image_url,
+        targets: original.targets,
+        total: original.total
+      }
+    })
   } catch (e) {
+    console.error('Error clone:', e)
     res.status(500).json({ error: 'Error clonando campaña' })
   }
 })
-
 
 // ========== TEMPLATES ==========
 
@@ -937,6 +951,36 @@ app.get('/api/campaigns', authOrSecret, requireLicense, async (req, res) => {
 })
 
 // ========== LICENCIA + ANTI-CLONACIÓN ==========
+
+// Iniciar campaña pendiente
+app.post('/api/campaigns/:id/start', authOrSecret, async (req, res) => {
+  try {
+    const campaign = await prisma.campaigns.findUnique({ where: { id: req.params.id } })
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
+    if (campaign.status !== 'pending') return res.status(400).json({ error: 'No está en espera' })
+
+    const targets = campaign.targets || []
+    if (!targets.length) return res.status(400).json({ error: 'Sin destinatarios' })
+
+    // Marcar como running antes de ejecutar
+    await prisma.campaigns.update({
+      where: { id: campaign.id },
+      data: { status: 'running' }
+    }).catch(() => {})
+
+    // Ejecutar fire & forget
+    waService.sendCampaign(campaign.id, campaign.line_id, targets, campaign.message, {
+      delayMin: 3000,
+      delayMax: 8000,
+      imageUrl: campaign.image_url
+    }).catch(console.error)
+
+    res.json({ success: true, campaignId: campaign.id, status: 'running' })
+  } catch (e) {
+    console.error('Error start:', e)
+    res.status(500).json({ error: 'Error iniciando campaña' })
+  }
+})
 
 app.post('/api/setup/activate', async (req, res) => {
   const { licenseKey } = req.body
