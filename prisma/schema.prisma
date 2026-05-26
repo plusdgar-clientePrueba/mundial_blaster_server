@@ -39,7 +39,7 @@
   model campaigns {
     id            String    @id
     name          String
-    line_id       String
+    line_id       String?
     message       String
     image_url     String?
     total         Int       @default(0)
