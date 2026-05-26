@@ -727,6 +727,7 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
 
 app.delete('/api/campaigns/:id', authOrSecret, async (req, res) => {
   try {
+    
     await prisma.campaigns.delete({ where: { id: req.params.id } })
     await prisma.campaign_logs.deleteMany({ where: { campaign_id: req.params.id } })
     res.json({ success: true })
@@ -937,61 +938,78 @@ app.post('/api/lineas/logout', authOrSecret, requireLicense, async (req, res) =>
 })
 
 // ========== CAMPAÑAS ==========
-app.post('/api/campaigns/send', authOrSecret, async (req, res) => {
+app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) => {
   try {
-    const { lineId, targets, message, imageUrl, delayMin, delayMax, name, schedule } = req.body
-    
-      // LOG TEMPORAL — sacalo después de verificar
-    console.log('📨 PAYLOAD RECIBIDO:', { 
-      name, 
-      nameType: typeof name,
-      schedule,
-      targetsCount: targets?.length 
-    })
-    
-    if (!lineId || !targets?.length || !message) {
-      return res.status(400).json({ error: 'Faltan datos' })
+    const body = req.body
+    const userId = req.user?.id || req.userId
+
+    if (!body.message || !body.message.trim()) {
+      return res.status(400).json({ error: 'El mensaje es obligatorio' })
+    }
+    if (!body.targets || !Array.isArray(body.targets) || body.targets.length === 0) {
+      return res.status(400).json({ error: 'Debes seleccionar al menos un contacto' })
     }
 
-    const campaignId = `camp_${Date.now()}`
+    const lineIds = body.line_ids || (body.line_id ? [body.line_id] : [])
+    if (lineIds.length === 0) {
+      return res.status(400).json({ error: 'Debes seleccionar al menos una línea' })
+    }
 
-    await prisma.campaigns.create({
-      data: {
-        id: campaignId,
-        name: name && name.trim() ? name.trim() : `Campaña ${new Date().toLocaleString('es-AR')}`,
-        line_id: lineId,
-        message,
-        image_url: imageUrl || null,
-        total: targets.length,
-        sent: 0,
-        failed: 0,
-        status: schedule === 'pending' ? 'pending' : 'running',
-        targets: targets
-      }
+    const lineasSeleccionadas = await prisma.lineas_whatsapp.findMany({
+      where: { id: { in: lineIds }, status: 'CONECTADA' }
     })
 
-    if (schedule === 'pending') {
-      return res.json({
-        success: true,
-        campaignId,
-        status: 'pending',
-        message: 'Campaña guardada. Ejecutala desde Reportes.'
+    if (lineasSeleccionadas.length === 0) {
+      return res.status(400).json({ 
+        error: 'Las líneas seleccionadas no están conectadas. Conectalas antes de enviar.' 
       })
     }
 
-    // Ejecutar ahora
-    const results = await waService.sendCampaign(
-      campaignId,
-      lineId,
-      targets,
-      message,
-      { delayMin, delayMax, imageUrl }
-    )
+    const distributionMode = body.distribution_mode || 'single'
+    const isRoundRobin = distributionMode === 'round_robin' && lineasSeleccionadas.length > 1
 
-    res.json({ success: true, campaignId, total: targets.length, results })
+    const newCampaign = await prisma.campaigns.create({
+      data: {
+        id: `camp_${Date.now()}`,
+        name: body.name || `Campaña ${new Date().toLocaleDateString('es-AR')}`,
+        message: body.message.trim(),
+        image_url: body.image_url || null,
+        total: body.targets.length,
+        sent: 0,
+        failed: 0,
+        status: 'pending',
+        targets: body.targets,
+        distribution_mode: isRoundRobin ? 'round_robin' : 'single',
+        selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id)),
+        user_id: userId || null
+      }
+    })
+
+    const options = {
+      delayMin: body.delay_min || 8000,
+      delayMax: body.delay_max || 15000,
+      imageUrl: body.image_url || null
+    }
+
+    waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), options)
+      .then(() => console.log(`✅ Campaña ${newCampaign.id} finalizada`))
+      .catch(err => console.error(`❌ Campaña ${newCampaign.id} falló:`, err))
+
+    res.status(201).json({
+      success: true,
+      campaign: {
+        id: newCampaign.id,
+        name: newCampaign.name,
+        status: 'running',
+        total: body.targets.length,
+        distribution_mode: isRoundRobin ? 'round_robin' : 'single',
+        lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
+      }
+    })
+
   } catch (e) {
-    console.error('Error campaña:', e)
-    res.status(500).json({ error: e.message || 'Error en campaña' })
+    console.error('Error creando campaña:', e)
+    res.status(500).json({ error: 'Error creando campaña' })
   }
 })
 
@@ -1000,7 +1018,29 @@ app.get('/api/campaigns', authOrSecret, requireLicense, async (req, res) => {
     const campaigns = await prisma.campaigns.findMany({
       orderBy: { created_at: 'desc' }
     })
-    res.json({ campaigns })
+    
+    const enriched = await Promise.all(campaigns.map(async (c) => {
+      let lineData = []
+      try {
+        if (c.selected_lines) {
+          const ids = JSON.parse(c.selected_lines)
+          lineData = await prisma.lineas_whatsapp.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, phone: true, nombre: true, status: true }
+          })
+        } else if (c.line_id) {
+          const line = await prisma.lineas_whatsapp.findUnique({
+            where: { id: c.line_id },
+            select: { id: true, phone: true, nombre: true, status: true }
+          })
+          if (line) lineData = [line]
+        }
+      } catch (e) { /* silent fallback */ }
+      
+      return { ...c, lines: lineData }
+    }))
+    
+    res.json({ campaigns: enriched })
   } catch (e) {
     res.status(500).json({ error: 'Error listando campañas' })
   }
