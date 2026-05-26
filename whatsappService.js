@@ -256,6 +256,8 @@ class WAService {
     }
   }
 
+  
+
   async sendCampaign(campaignId, lineId, targets, message, options = {}) {
   const { delayMin = 3000, delayMax = 8000, imageUrl = null } = options
 
@@ -270,11 +272,12 @@ class WAService {
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i]
     try {
-      const personalized = message
-        .replace(/\{\{nombre\}\}/gi, target.name || '')
-        .replace(/\{nombre\}/gi, target.name || '')
-        .replace(/\{\{telefono\}\}/gi, target.phone || '')
-        .replace(/\{telefono\}/gi, target.phone || '')
+      const resolvedMessage = resolveSpintax(message)
+const personalized = resolvedMessage
+  .replace(/\{\{nombre\}\}/gi, target.name || 'Cliente')
+  .replace(/\{nombre\}/gi, target.name || 'Cliente')
+  .replace(/\{\{telefono\}\}/gi, target.phone || '')
+  .replace(/\{telefono\}/gi, target.phone || '')
 
       await this.sendMessage(lineId, target.phone, personalized, {
         type: imageUrl ? 'image' : 'text',
@@ -360,6 +363,8 @@ class WAService {
     return { success: true }
   }
 }
+
+
 
 // 🧹 Cleanup graceful al recibir SIGTERM (Railway reinicia containers)
 process.on('SIGTERM', () => {
