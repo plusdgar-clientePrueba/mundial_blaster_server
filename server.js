@@ -683,6 +683,14 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
     const original = await prisma.campaigns.findUnique({ where: { id: req.params.id } })
     if (!original) return res.status(404).json({ error: 'Campaña no encontrada' })
 
+    // LOG DEBUG
+    console.log('📋 Original campaign:', { 
+      id: original.id, 
+      name: original.name, 
+      hasTargets: !!original.targets,
+      targetsCount: original.targets?.length || 0 
+    })
+
     const newId = `camp_${Date.now()}`
     await prisma.campaigns.create({
       data: {
@@ -699,7 +707,6 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
       }
     })
 
-    // Devolvemos los datos para que el frontend cargue el editor
     res.json({ 
       success: true, 
       campaign: {
