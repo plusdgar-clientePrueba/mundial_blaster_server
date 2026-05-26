@@ -57,6 +57,16 @@ function verifyToken(token) {
   }
 }
 
+function resolveSpintax(text) {
+  if (!text) return text
+  // Solo reemplaza {{a|b|c}} (tiene pipe). Deja {{nombre}} intacto para variables.
+  return text.replace(/\{\{([^}]+)\}\}/g, (match, content) => {
+    if (!content.includes('|')) return match
+    const variants = content.split("|").map(s => s.trim()).filter(Boolean)
+    return variants.length ? variants[Math.floor(Math.random() * variants.length)] : ''
+  })
+}
+
 // ============================================================
 // MIDDLEWARES
 // ============================================================
@@ -857,9 +867,12 @@ app.post('/api/lineas/logout', authOrSecret, requireLicense, async (req, res) =>
 })
 
 // ========== CAMPAÑAS ==========
-app.post('/api/campaigns/send', authOrSecret, async (req, res) => {
+app.post('/api/campaign/send', authOrSecret, async (req, res) => {
   try {
     const { lineId, targets, message, imageUrl, delayMin, delayMax, name, schedule } = req.body
+    
+    console.log('📨 Campaign payload:', { name, schedule, targetsCount: targets?.length })
+    
     if (!lineId || !targets?.length || !message) {
       return res.status(400).json({ error: 'Faltan datos' })
     }
@@ -869,7 +882,7 @@ app.post('/api/campaigns/send', authOrSecret, async (req, res) => {
     await prisma.campaigns.create({
       data: {
         id: campaignId,
-        name: name || `Campaña ${new Date().toLocaleString('es-AR')}`,
+        name: name && name.trim() ? name.trim() : `Campaña ${new Date().toLocaleString('es-AR')}`,
         line_id: lineId,
         message,
         image_url: imageUrl || null,
@@ -877,7 +890,7 @@ app.post('/api/campaigns/send', authOrSecret, async (req, res) => {
         sent: 0,
         failed: 0,
         status: schedule === 'pending' ? 'pending' : 'running',
-        targets: targets // Prisma guarda JSON automáticamente
+        targets: targets
       }
     })
 
