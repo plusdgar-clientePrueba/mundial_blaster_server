@@ -867,7 +867,7 @@ app.post('/api/lineas/logout', authOrSecret, requireLicense, async (req, res) =>
 })
 
 // ========== CAMPAÑAS ==========
-app.post('/api/campaign/send', authOrSecret, async (req, res) => {
+app.post('/api/campaigns/send', authOrSecret, async (req, res) => {
   try {
     const { lineId, targets, message, imageUrl, delayMin, delayMax, name, schedule } = req.body
     
