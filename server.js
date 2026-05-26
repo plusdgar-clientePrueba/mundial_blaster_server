@@ -14,6 +14,26 @@ const JWT_SECRET = process.env.JWT_SECRET || SECRET || 'cambiar-en-produccion'
 const prisma = new PrismaClient()
 const app = express()
 const server = http.createServer(app)
+
+// CORS: permitir localhost en desarrollo + Vercel en producción
+const cors = require('cors')
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://mundial-blaster-web-three.vercel.app', // tu dominio de Vercel
+]
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permitir requests sin origin (como Postman, curl, o server-to-server)
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes(origin)) return callback(null, true)
+    callback(new Error('Not allowed by CORS: ' + origin))
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-secret'],
+}))
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 })
