@@ -20,7 +20,7 @@ class WAService {
     this.clients = new Map()
     this.reconnectTimers = {}
     this.presenceIntervals = {}
-    this.sessionsDir = path.join(process.cwd(), 'sessions')
+    this.sessionsDir = '/app/sessions'
     this.msgRetryCounterCache = new NodeCache()
     fs.ensureDirSync(this.sessionsDir)
   }
