@@ -871,7 +871,13 @@ app.post('/api/campaign/send', authOrSecret, async (req, res) => {
   try {
     const { lineId, targets, message, imageUrl, delayMin, delayMax, name, schedule } = req.body
     
-    console.log('📨 Campaign payload:', { name, schedule, targetsCount: targets?.length })
+      // LOG TEMPORAL — sacalo después de verificar
+    console.log('📨 PAYLOAD RECIBIDO:', { 
+      name, 
+      nameType: typeof name,
+      schedule,
+      targetsCount: targets?.length 
+    })
     
     if (!lineId || !targets?.length || !message) {
       return res.status(400).json({ error: 'Faltan datos' })
