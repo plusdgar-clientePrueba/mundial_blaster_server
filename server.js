@@ -645,6 +645,24 @@ app.get('/api/campaigns/report', authOrSecret, async (req, res) => {
   }
 })
 
+app.post('/api/campaigns/:id/cancel', authOrSecret, async (req, res) => {
+  try {
+    const campaign = await prisma.campaigns.findUnique({ where: { id: req.params.id } })
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
+    if (campaign.status !== 'running') return res.status(400).json({ error: 'No está en ejecución' })
+
+    await prisma.campaigns.update({
+      where: { id: req.params.id },
+      data: { status: 'cancelled' }
+    })
+    
+    res.json({ success: true, status: 'cancelled' })
+  } catch (e) {
+    console.error('Error cancelando:', e)
+    res.status(500).json({ error: 'Error cancelando campaña' })
+  }
+})
+
 // Endpoint para detalle de campaña (logs individuales)
 app.get('/api/campaigns/:id/logs', authOrSecret, requireLicense, async (req, res) => {
 
