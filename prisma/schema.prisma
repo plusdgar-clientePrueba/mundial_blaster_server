@@ -49,6 +49,8 @@
     status        String    @default("running") // running | completed | failed | scheduled
     created_at    DateTime  @default(now())
     finished_at   DateTime?
+    distribution_mode String   @default("single") // single | round_robin | split
+    selected_lines    String?  // JSON: ["uuid-linea-a", "uuid-linea-b"]
     
     
     @@index([created_at])
