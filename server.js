@@ -680,6 +680,17 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
   }
 })
 
+app.delete('/api/campaigns/:id', authOrSecret, async (req, res) => {
+  try {
+    await prisma.campaigns.delete({ where: { id: req.params.id } })
+    await prisma.campaign_logs.deleteMany({ where: { campaign_id: req.params.id } })
+    res.json({ success: true })
+  } catch (e) {
+    console.error('Error delete campaign:', e)
+    res.status(500).json({ error: 'Error eliminando campaña' })
+  }
+})
+
 // ========== TEMPLATES ==========
 
 app.get('/api/templates', authOrSecret, async (req, res) => {
@@ -1017,24 +1028,80 @@ app.post('/api/setup/activate', async (req, res) => {
   res.json({ success: true, tier: license.tier, features: license })
 })
 
-app.get('/api/license/status', async (req, res) => {
-  const config = await prisma.app_config.findUnique({ where: { key: 'license' } })
-  if (!config?.value) return res.json({ active: false })
+// app.get('/api/license/status', async (req, res) => {
+//   const config = await prisma.app_config.findUnique({ where: { key: 'license' } })
+//   if (!config?.value) return res.json({ active: false })
 
-  const license = validateLicense(config.value)
-  if (!license) return res.json({ active: false, invalid: true })
+//   const license = validateLicense(config.value)
+//   if (!license) return res.json({ active: false, invalid: true })
 
-  // Anti-clonación: verificar dominio vinculado
-  const instanceDomain = process.env.RAILWAY_STATIC_URL ||
-                         process.env.VERCEL_URL ||
-                         req.headers.host
-  const savedDomain = await prisma.app_config.findUnique({ where: { key: 'instance_domain' } })
+//   // Anti-clonación: verificar dominio vinculado
+//   const instanceDomain = process.env.RAILWAY_STATIC_URL ||
+//                          process.env.VERCEL_URL ||
+//                          req.headers.host
+//   const savedDomain = await prisma.app_config.findUnique({ where: { key: 'instance_domain' } })
 
-  if (savedDomain?.value && savedDomain.value !== instanceDomain) {
-    return res.json({ active: false, domainMismatch: true })
+//   if (savedDomain?.value && savedDomain.value !== instanceDomain) {
+//     return res.json({ active: false, domainMismatch: true })
+//   }
+
+//   res.json({ active: true, tier: license.tier, ...license })
+// })
+
+app.get('/api/license/status', authOrSecret, async (req, res) => {
+  try {
+    const origin = req.headers.origin || req.headers.referer || ''
+    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1') || origin === ''
+
+    // Si es localhost y hay usuario autenticado → Pro para desarrollo
+    if (isLocalhost && req.userId) {
+      // Opcional: buscar si tiene licencia real y devolver esa
+      const userLicense = await prisma.licenses?.findFirst({
+        where: { user_id: req.userId, active: true }
+      })
+
+      if (userLicense) {
+        return res.json({
+          active: true,
+          tier: userLicense.tier,
+          maxLines: userLicense.maxLines || 3,
+          label: userLicense.label || 'Pro'
+        })
+      }
+
+      // Si no tiene licencia en DB, dar Pro de desarrollo
+      return res.json({
+        active: true,
+        tier: 'pro',
+        maxLines: 3,
+        label: 'Dev Local',
+        features: { unlimited: true }
+      })
+    }
+
+    // ─── LÓGICA NORMAL DE PRODUCCIÓN ───
+    const domain = req.headers.origin?.replace(/^https?:\/\//, '').split(':')[0] || req.headers.host
+    
+    const license = await prisma.licenses.findFirst({
+      where: { domain, active: true }
+    })
+
+    if (!license) {
+      return res.json({ active: false, reason: 'NO_LICENSE_FOR_DOMAIN' })
+    }
+
+    res.json({
+      active: true,
+      tier: license.tier,
+      maxLines: license.maxLines,
+      label: license.label,
+      features: license.features
+    })
+
+  } catch (e) {
+    console.error('Error license/status:', e)
+    res.status(500).json({ error: 'Error verificando licencia' })
   }
-
-  res.json({ active: true, tier: license.tier, ...license })
 })
 
 // ========== ADMIN (nuclear, solo con SECRET) ==========
