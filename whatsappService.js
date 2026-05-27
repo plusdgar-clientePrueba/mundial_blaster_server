@@ -13,6 +13,16 @@ const QRCode = require('qrcode')
 const NodeCache = require('node-cache')
 const logger = pino({ level: 'silent' })
 
+// === UTILS ===
+function resolveSpintax(text) {
+  if (!text) return ''
+  return text.replace(/\{\{([^}]+)\}\}/g, (match, content) => {
+    if (!content.includes('|')) return match
+    const variants = content.split("|").map(s => s.trim()).filter(Boolean)
+    return variants.length ? variants[Math.floor(Math.random() * variants.length)] : ''
+  })
+}
+
 class WAService {
   constructor(prisma, io) {
     this.prisma = prisma
@@ -230,6 +240,8 @@ class WAService {
     if (!jid) return ''
     return jid.split('@')[0].split(':')[0].replace(/\D/g, '')
   }
+
+  
 
   async sendMessage(lineId, contactPhone, content, options = {}) {
     const { type = 'text', imageUrl = null } = options

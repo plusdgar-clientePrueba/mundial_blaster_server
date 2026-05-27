@@ -941,8 +941,8 @@ app.post('/api/lineas/logout', authOrSecret, requireLicense, async (req, res) =>
 app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) => {
   try {
     const body = req.body
-    const userId = req.user?.id || req.userId
 
+    // ─── VALIDACIONES ───
     if (!body.message || !body.message.trim()) {
       return res.status(400).json({ error: 'El mensaje es obligatorio' })
     }
@@ -950,6 +950,7 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
       return res.status(400).json({ error: 'Debes seleccionar al menos un contacto' })
     }
 
+    // ─── LÍNEAS ───
     const lineIds = body.line_ids || (body.line_id ? [body.line_id] : [])
     if (lineIds.length === 0) {
       return res.status(400).json({ error: 'Debes seleccionar al menos una línea' })
@@ -960,14 +961,17 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
     })
 
     if (lineasSeleccionadas.length === 0) {
-      return res.status(400).json({ 
-        error: 'Las líneas seleccionadas no están conectadas. Conectalas antes de enviar.' 
+      return res.status(400).json({
+        error: 'Las líneas seleccionadas no están conectadas. Conectalas antes de enviar.'
       })
     }
 
+    // ─── MODO ───
     const distributionMode = body.distribution_mode || 'single'
     const isRoundRobin = distributionMode === 'round_robin' && lineasSeleccionadas.length > 1
+    const isScheduled = body.schedule === 'pending'
 
+    // ─── CREAR CAMPAÑA ───
     const newCampaign = await prisma.campaigns.create({
       data: {
         id: `camp_${Date.now()}`,
@@ -977,15 +981,30 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
         total: body.targets.length,
         sent: 0,
         failed: 0,
-        status: 'pending',
+        status: isScheduled ? 'scheduled' : 'pending',
         targets: body.targets,
         distribution_mode: isRoundRobin ? 'round_robin' : 'single',
         line_id: lineasSeleccionadas[0]?.id || '',
-        selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id)),
-        // user_id: userId || null
+        selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id))
       }
     })
 
+    // ─── SI ES SCHEDULED: SOLO GUARDAR, NO DISPARAR ───
+    if (isScheduled) {
+      return res.status(201).json({
+        success: true,
+        campaign: {
+          id: newCampaign.id,
+          name: newCampaign.name,
+          status: 'scheduled',
+          total: body.targets.length,
+          distribution_mode: isRoundRobin ? 'round_robin' : 'single',
+          lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
+        }
+      })
+    }
+
+    // ─── SI ES NOW: DISPARAR EN BACKGROUND ───
     const options = {
       delayMin: body.delay_min || 8000,
       delayMax: body.delay_max || 15000,
@@ -1009,8 +1028,8 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
     })
 
   } catch (e) {
-    console.error('Error creando campaña:', e)
-    res.status(500).json({ error: 'Error creando campaña' })
+    console.error('💥 Error creando campaña:', e)
+    res.status(500).json({ error: 'Error creando campaña', detail: e.message })
   }
 })
 
