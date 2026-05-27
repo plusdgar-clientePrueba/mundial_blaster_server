@@ -996,7 +996,8 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
         targets: body.targets,
         distribution_mode: isRoundRobin ? 'round_robin' : 'single',
         line_id: lineasSeleccionadas[0]?.id || '',
-        selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id))
+        selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id)),
+        human_mode: body.human_mode === true  // ← NUEVO
       }
     })
 
@@ -1018,7 +1019,8 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
         const sendOptions = {
       delayMin: body.delay_min || 8000,
       delayMax: body.delay_max || 15000,
-      imageUrl: body.image_url || null
+      imageUrl: body.image_url || null,
+      humanMode: body.human_mode === true  // ← NUEVO
     }
 
     waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), sendOptions)
@@ -1115,7 +1117,9 @@ app.post('/api/campaigns/:id/start', authOrSecret, async (req, res) => {
     waService.sendCampaign(campaign.id, lineasSeleccionadas, targets, campaign.message, {
       delayMin: 5000,
       delayMax: 12000,
-      imageUrl: campaign.image_url
+      imageUrl: campaign.image_url,
+      humanMode: campaign.human_mode === true  // ← NUEVO: lee de DB
+       
     }).catch(console.error)
 
     res.json({ success: true, campaignId: campaign.id, status: 'running' })
