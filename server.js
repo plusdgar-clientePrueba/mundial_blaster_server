@@ -1111,9 +1111,13 @@ app.get('/api/campaigns', authOrSecret, requireLicense, async (req, res) => {
           })
           if (line) lineData = [line]
         }
-      } catch (e) { /* silent fallback */ }
+       } catch (e) { /* silent fallback */ }
       
-      return { ...c, lines: lineData }
+      const scheduled = await prisma.scheduled_campaigns.findUnique({
+        where: { campaign_id: c.id }
+      }).catch(() => null)
+      
+      return { ...c, lines: lineData, scheduled }
     }))
     
     res.json({ campaigns: enriched })
