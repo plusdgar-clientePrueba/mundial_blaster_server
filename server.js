@@ -597,10 +597,18 @@ app.get('/api/campaigns/report', authOrSecret, async (req, res) => {
       dateFilter = { created_at: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }
     }
     
-    const campaigns = await prisma.campaigns.findMany({
+        const campaigns = await prisma.campaigns.findMany({
       where: dateFilter,
       orderBy: { created_at: 'desc' }
     })
+    
+    // Enriquecer con datos de programación
+    const campaignsWithScheduled = await Promise.all(campaigns.map(async (c) => {
+      const scheduled = await prisma.scheduled_campaigns.findUnique({
+        where: { campaign_id: c.id }
+      }).catch(() => null)
+      return { ...c, scheduled }
+    }))
     
     // Stats agregadas
         // Stats agregadas
@@ -639,7 +647,7 @@ app.get('/api/campaigns/report', authOrSecret, async (req, res) => {
       .sort((a, b) => a.date.localeCompare(b.date))
     
     res.json({
-      campaigns,
+      campaigns: campaignsWithScheduled,
       stats: {
         totalCampaigns: campaigns.length,
         totalSent,
