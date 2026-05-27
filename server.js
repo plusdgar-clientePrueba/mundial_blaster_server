@@ -705,7 +705,7 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
     })
 
     const newId = `camp_${Date.now()}`
-    await prisma.campaigns.create({
+        await prisma.campaigns.create({
       data: {
         id: newId,
         name: `${original.name} (copia)`,
@@ -716,7 +716,10 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
         sent: 0,
         failed: 0,
         status: 'pending',
-        targets: original.targets
+        targets: original.targets,
+        distribution_mode: original.distribution_mode || 'single',
+        selected_lines: original.selected_lines,
+        human_mode: original.human_mode || false  // ← NUEVO
       }
     })
 
@@ -1021,10 +1024,24 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
 
     // ─── PROGRAMAR PARA FECHA/HORA ───
     if (isScheduled) {
+      const executeAt = new Date(body.execute_at)
+      const now = new Date()
+
+      if (isNaN(executeAt.getTime())) {
+        return res.status(400).json({ error: 'Fecha de programación inválida' })
+      }
+      if (executeAt <= now) {
+        return res.status(400).json({ 
+          error: 'La fecha de programación debe ser futura',
+          received: body.execute_at,
+          serverTime: now.toISOString()
+        })
+      }
+
       await prisma.scheduled_campaigns.create({
         data: {
           campaign_id: newCampaign.id,
-          execute_at: new Date(body.execute_at),
+          execute_at: executeAt,
           status: 'pending'
         }
       })
@@ -1310,12 +1327,13 @@ app.post('/api/admin/reset-user', authMiddleware, async (req, res) => {
 
 cron.schedule('* * * * *', async () => {
   try {
-    const now = new Date()
+        const now = new Date()
     const pending = await prisma.scheduled_campaigns.findMany({
       where: {
         status: 'pending',
         execute_at: { lte: now }
-      }
+      },
+      orderBy: { execute_at: 'asc' }
     })
 
     if (pending.length === 0) return
