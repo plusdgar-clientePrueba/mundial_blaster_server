@@ -268,7 +268,39 @@ class WAService {
     }
   }
 
-  
+      async sendMessageHuman(lineId, contactPhone, content, options = {}) {
+    const waClient = this.clients.get(lineId) || this.clients.get(String(lineId))
+    if (!waClient || !waClient.user) throw new Error('Línea no conectada')
+
+    const cleanNumber = this.cleanJid(contactPhone)
+    const isGroup = cleanNumber.length > 15
+    const jid = isGroup ? `${cleanNumber}@g.us` : `${cleanNumber}@s.whatsapp.net`
+
+    // 1. Mostrar "escribiendo..."
+    await waClient.sendPresenceUpdate('composing', jid)
+
+    // 2. Delay proporcional al texto (50ms por char, entre 2s y 8s máximo)
+    const typingDelay = Math.min(8000, Math.max(2000, content.length * 50))
+    await new Promise(r => setTimeout(r, typingDelay))
+
+    // 3. Pausar typing indicator
+    await waClient.sendPresenceUpdate('paused', jid)
+
+    // 4. Pequeña pausa post-typing antes del envío real
+    await new Promise(r => setTimeout(r, 500))
+
+    // 5. Enviar mensaje real
+    const { type = 'text', imageUrl = null } = options
+    let messagePayload = {}
+    if (type === 'image' && imageUrl) {
+      messagePayload = { image: { url: imageUrl }, caption: content || '' }
+    } else {
+      messagePayload = { text: content }
+    }
+
+    await waClient.sendMessage(jid, messagePayload)
+    return { success: true }
+  }
 
 async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
   const { delayMin = 8000, delayMax = 15000, imageUrl = null } = options
@@ -354,10 +386,15 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
         .replace(/\{\{telefono\}\}/gi, target.phone || '')
         .replace(/\{telefono\}/gi, target.phone || '')
 
-      await this.sendMessage(lineaAsignada.id, target.phone, personalized, {
+      const sendOptions = {
         type: imageUrl ? 'image' : 'text',
         imageUrl
-      })
+      }
+      if (options.humanMode) {
+        await this.sendMessageHuman(lineaAsignada.id, target.phone, personalized, sendOptions)
+      } else {
+        await this.sendMessage(lineaAsignada.id, target.phone, personalized, sendOptions)
+      }
 
       results.push({ phone: target.phone, status: 'sent', lineId: lineaAsignada.id, index: i })
 
@@ -438,8 +475,10 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
 
     // Delay anti-ban (solo si no es el último)
     if (i < targets.length - 1 && !wasCancelled) {
-      const delay = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
-      await new Promise(r => setTimeout(r, delay))
+      const baseDelay = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
+      // Modo humano: delay extra 3-8 segundos adicionales
+      const humanExtra = options.humanMode ? (3000 + Math.random() * 5000) : 0
+      await new Promise(r => setTimeout(r, baseDelay + humanExtra))
     }
   }
 
