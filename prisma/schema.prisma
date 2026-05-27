@@ -73,16 +73,20 @@ model campaign_attachments {
   filename    String?
 }
 
-  model campaign_logs {
+ model campaign_logs {
     id            String    @id @default(uuid())
     campaign_id   String
     contact_phone String
     status        String
-    line_id       String
-    owner_id      String
+    line_id       String?     // ← opcional (cuando todas las líneas caen)
+    owner_id      String?     // ← opcional (WAService no tiene userId)
+    error         String?     // ← NUEVO: para guardar mensaje de error
     sent_at       DateTime?
     created_at    DateTime  @default(now())
-  }
+    
+    @@index([campaign_id])
+    @@index([created_at])
+}
 
 
   model contacts {

@@ -376,13 +376,17 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
       }).catch(() => {})
 
       this.io.emit('campaign_log', {
-  campaign_id: campaignId,           // ← snake_case
-  contact_phone: target.phone,       // ← contact_phone
-  status: 'sent',
-  line_id: lineaAsignada.id,         // ← line_id (consistente con DB)
-  line_phone: lineaAsignada.phone,
-  progress: `${i + 1}/${targets.length}`
-})
+        campaignId: campaignId,           // camelCase (dashboard en vivo)
+        campaign_id: campaignId,          // snake_case (reports/page.tsx)
+        phone: target.phone,              // camelCase
+        contact_phone: target.phone,      // snake_case
+        status: 'sent',
+        lineId: lineaAsignada.id,         // camelCase
+        line_id: lineaAsignada.id,        // snake_case
+        linePhone: lineaAsignada.phone,
+        line_phone: lineaAsignada.phone,
+        progress: `${i + 1}/${targets.length}`
+      })
 
       console.log(`✅ ${i + 1}/${targets.length} → ${target.phone} [${lineaAsignada.phone}]`)
       lineaIndex++ // avanzar al siguiente para el próximo contacto
@@ -399,15 +403,19 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
         data: { failed: { increment: 1 } }
       }).catch(() => {})
 
-      this.io.emit('campaign_log', {
-  campaign_id: campaignId,
-  contact_phone: target.phone,
-  status: 'failed',
-  line_id: lineaAsignada.id,
-  line_phone: lineaAsignada.phone,
-  error: err.message?.slice(0, 200),  // ← más info, no 50 chars
-  progress: `${i + 1}/${targets.length}`
-})
+        this.io.emit('campaign_log', {
+        campaignId: campaignId,
+        campaign_id: campaignId,
+        phone: target.phone,
+        contact_phone: target.phone,
+        status: 'failed',
+        lineId: lineaAsignada.id,
+        line_id: lineaAsignada.id,
+        linePhone: lineaAsignada.phone,
+        line_phone: lineaAsignada.phone,
+        error: err.message?.slice(0, 200),
+        progress: `${i + 1}/${targets.length}`
+      })
 
       await this.prisma.campaign_logs.create({
         data: {
@@ -443,11 +451,14 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
   }).catch(() => {})
 
   this.io.emit('campaign_complete', {
-  campaign_id: campaignId,           // ← snake_case
-  status: finalStatus,
-  total_sent: results.filter(r => r.status === 'sent').length,
-  total_failed: results.filter(r => r.status === 'failed').length
-})
+    campaignId: campaignId,
+    campaign_id: campaignId,
+    status: finalStatus,
+    sent: results.filter(r => r.status === 'sent').length,
+    failed: results.filter(r => r.status === 'failed').length,
+    total_sent: results.filter(r => r.status === 'sent').length,
+    total_failed: results.filter(r => r.status === 'failed').length
+  })
 
   return results
 }
