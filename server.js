@@ -969,9 +969,8 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
     // ─── MODO ───
     const distributionMode = body.distribution_mode || 'single'
     const isRoundRobin = distributionMode === 'round_robin' && lineasSeleccionadas.length > 1
-    const isScheduled = body.schedule === 'pending'
+        const isScheduled = body.schedule === 'pending'
 
-    // ─── CREAR CAMPAÑA ───
     const newCampaign = await prisma.campaigns.create({
       data: {
         id: `camp_${Date.now()}`,
@@ -981,11 +980,49 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
         total: body.targets.length,
         sent: 0,
         failed: 0,
-        status: isScheduled ? 'scheduled' : 'pending',
+        status: 'pending', // ← SIEMPRE pending, nunca scheduled
         targets: body.targets,
         distribution_mode: isRoundRobin ? 'round_robin' : 'single',
         line_id: lineasSeleccionadas[0]?.id || '',
         selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id))
+      }
+    })
+
+    // ─── GUARDAR PARA DESPUÉS: solo responder, no disparar ───
+    if (isScheduled) {
+      return res.status(201).json({
+        success: true,
+        campaign: {
+          id: newCampaign.id,
+          name: newCampaign.name,
+          status: 'pending',
+          total: body.targets.length,
+          distribution_mode: isRoundRobin ? 'round_robin' : 'single',
+          lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
+        }
+      })
+    }
+
+    // ─── ENVIAR AHORA: disparar en background ───
+    const options = {
+      delayMin: body.delay_min || 8000,
+      delayMax: body.delay_max || 15000,
+      imageUrl: body.image_url || null
+    }
+
+    waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), options)
+      .then(() => console.log(`✅ Campaña ${newCampaign.id} finalizada`))
+      .catch(err => console.error(`❌ Campaña ${newCampaign.id} falló:`, err))
+
+    res.status(201).json({
+      success: true,
+      campaign: {
+        id: newCampaign.id,
+        name: newCampaign.name,
+        status: 'running',
+        total: body.targets.length,
+        distribution_mode: isRoundRobin ? 'round_robin' : 'single',
+        lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
       }
     })
 
@@ -1069,6 +1106,7 @@ app.get('/api/campaigns', authOrSecret, requireLicense, async (req, res) => {
 // ========== LICENCIA + ANTI-CLONACIÓN ==========
 
 // Iniciar campaña pendiente
+// Iniciar campaña pendiente
 app.post('/api/campaigns/:id/start', authOrSecret, async (req, res) => {
   try {
     const campaign = await prisma.campaigns.findUnique({ where: { id: req.params.id } })
@@ -1078,14 +1116,29 @@ app.post('/api/campaigns/:id/start', authOrSecret, async (req, res) => {
     const targets = campaign.targets || []
     if (!targets.length) return res.status(400).json({ error: 'Sin destinatarios' })
 
-    // Marcar como running antes de ejecutar
+    // ─── Resolver líneas (round-robin compatible) ───
+    let lineIds = []
+    try {
+      if (campaign.selected_lines) lineIds = JSON.parse(campaign.selected_lines)
+    } catch (e) {}
+    if (lineIds.length === 0 && campaign.line_id) lineIds = [campaign.line_id]
+
+    const lineasSeleccionadas = await prisma.lineas_whatsapp.findMany({
+      where: { id: { in: lineIds }, status: 'CONECTADA' }
+    })
+
+    if (lineasSeleccionadas.length === 0) {
+      return res.status(400).json({ error: 'Las líneas no están conectadas' })
+    }
+
+    // Marcar como running
     await prisma.campaigns.update({
       where: { id: campaign.id },
       data: { status: 'running' }
     }).catch(() => {})
 
-    // Ejecutar fire & forget
-    waService.sendCampaign(campaign.id, campaign.line_id, targets, campaign.message, {
+    // Disparar fire & forget
+    waService.sendCampaign(campaign.id, lineasSeleccionadas, targets, campaign.message, {
       delayMin: 3000,
       delayMax: 8000,
       imageUrl: campaign.image_url
