@@ -1004,13 +1004,13 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
     }
 
     // ─── ENVIAR AHORA: disparar en background ───
-    const options = {
+    const sendOptions = {
       delayMin: body.delay_min || 8000,
       delayMax: body.delay_max || 15000,
       imageUrl: body.image_url || null
     }
 
-    waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), options)
+    waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), sendOptions)
       .then(() => console.log(`✅ Campaña ${newCampaign.id} finalizada`))
       .catch(err => console.error(`❌ Campaña ${newCampaign.id} falló:`, err))
 
