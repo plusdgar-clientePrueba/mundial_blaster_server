@@ -268,7 +268,7 @@ class WAService {
     }
   }
 
-      async sendMessageHuman(lineId, contactPhone, content, options = {}) {
+        async sendMessageHuman(lineId, contactPhone, content, options = {}) {
     const waClient = this.clients.get(lineId) || this.clients.get(String(lineId))
     if (!waClient || !waClient.user) throw new Error('Línea no conectada')
 
@@ -276,30 +276,41 @@ class WAService {
     const isGroup = cleanNumber.length > 15
     const jid = isGroup ? `${cleanNumber}@g.us` : `${cleanNumber}@s.whatsapp.net`
 
-    // 1. Mostrar "escribiendo..."
-    await waClient.sendPresenceUpdate('composing', jid)
+    console.log(`[HUMAN MODE] Iniciando typing para ${contactPhone} → JID: ${jid}`)
 
-    // 2. Delay proporcional al texto (50ms por char, entre 2s y 8s máximo)
-    const typingDelay = Math.min(8000, Math.max(2000, content.length * 50))
-    await new Promise(r => setTimeout(r, typingDelay))
+    try {
+      // 1. Composing
+      await waClient.sendPresenceUpdate('composing', jid)
+      console.log(`[HUMAN MODE] ✅ composing enviado`)
 
-    // 3. Pausar typing indicator
-    await waClient.sendPresenceUpdate('paused', jid)
+      // 2. Delay proporcional al texto (50ms por char, entre 2s y 8s)
+      const typingDelay = Math.min(8000, Math.max(2000, content.length * 50))
+      console.log(`[HUMAN MODE] ⏳ Esperando ${typingDelay}ms (${content.length} caracteres)`)
+      await new Promise(r => setTimeout(r, typingDelay))
 
-    // 4. Pequeña pausa post-typing antes del envío real
-    await new Promise(r => setTimeout(r, 500))
+      // 3. Pausar typing
+      await waClient.sendPresenceUpdate('paused', jid)
+      console.log(`[HUMAN MODE] ✅ paused enviado`)
 
-    // 5. Enviar mensaje real
-    const { type = 'text', imageUrl = null } = options
-    let messagePayload = {}
-    if (type === 'image' && imageUrl) {
-      messagePayload = { image: { url: imageUrl }, caption: content || '' }
-    } else {
-      messagePayload = { text: content }
+      // 4. Pausa post-typing
+      await new Promise(r => setTimeout(r, 500))
+
+      // 5. Enviar mensaje real (mismo código que sendMessage)
+      const { type = 'text', imageUrl = null } = options
+      let messagePayload = {}
+      if (type === 'image' && imageUrl) {
+        messagePayload = { image: { url: imageUrl }, caption: content || '' }
+      } else {
+        messagePayload = { text: content }
+      }
+
+      await waClient.sendMessage(jid, messagePayload)
+      console.log(`[HUMAN MODE] ✅ Mensaje enviado`)
+      return { success: true }
+    } catch (err) {
+      console.error(`[HUMAN MODE] ❌ Error:`, err.message)
+      throw err
     }
-
-    await waClient.sendMessage(jid, messagePayload)
-    return { success: true }
   }
 
 async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
@@ -332,6 +343,7 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
   let wasCancelled = false
   let lineaIndex = 0
   const lineasCaidas = new Set()
+   let lastDelayMs = 0
 
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i]
@@ -421,6 +433,7 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
         lineId: lineaAsignada.id,         // camelCase
         line_id: lineaAsignada.id,        // snake_case
         linePhone: lineaAsignada.phone,
+         delayMs: lastDelayMs, 
         line_phone: lineaAsignada.phone,
         progress: `${i + 1}/${targets.length}`
       })
@@ -447,6 +460,7 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
         contact_phone: target.phone,
         status: 'failed',
         lineId: lineaAsignada.id,
+         delayMs: lastDelayMs, 
         line_id: lineaAsignada.id,
         linePhone: lineaAsignada.phone,
         line_phone: lineaAsignada.phone,
@@ -474,11 +488,13 @@ async sendCampaign(campaignId, lineInput, targets, message, options = {}) {
     }
 
     // Delay anti-ban (solo si no es el último)
+        // Delay anti-ban (solo si no es el último)
     if (i < targets.length - 1 && !wasCancelled) {
       const baseDelay = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
-      // Modo humano: delay extra 3-8 segundos adicionales
       const humanExtra = options.humanMode ? (3000 + Math.random() * 5000) : 0
-      await new Promise(r => setTimeout(r, baseDelay + humanExtra))
+      lastDelayMs = baseDelay + humanExtra // ← GUARDAR para el próximo log
+      console.log(`[DELAY] Esperando ${lastDelayMs}ms antes del siguiente mensaje`)
+      await new Promise(r => setTimeout(r, lastDelayMs))
     }
   }
 
