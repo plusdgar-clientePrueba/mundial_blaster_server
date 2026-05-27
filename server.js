@@ -6,6 +6,7 @@ const { PrismaClient } = require('@prisma/client')
 const { WAService } = require('./whatsappService')
 const jwt = require('jsonwebtoken')
 const bcrypt = require('bcryptjs')
+const cron = require('node-cron')
 
 const PORT = process.env.PORT || 8080
 const SECRET = process.env.WHATSAPP_SECRET
@@ -981,7 +982,8 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
     // ─── MODO ───
     const distributionMode = body.distribution_mode || 'single'
     const isRoundRobin = distributionMode === 'round_robin' && lineasSeleccionadas.length > 1
-        const isScheduled = body.schedule === 'pending'
+      const isPending = body.schedule === 'pending'
+    const isScheduled = body.schedule === 'scheduled' && body.execute_at
 
     const newCampaign = await prisma.campaigns.create({
       data: {
@@ -1002,7 +1004,8 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
     })
 
     // ─── GUARDAR PARA DESPUÉS: solo responder, no disparar ───
-    if (isScheduled) {
+        // ─── GUARDAR PARA DESPUÉS (manual) ───
+    if (isPending) {
       return res.status(201).json({
         success: true,
         campaign: {
@@ -1013,6 +1016,30 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
           distribution_mode: isRoundRobin ? 'round_robin' : 'single',
           lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
         }
+      })
+    }
+
+    // ─── PROGRAMAR PARA FECHA/HORA ───
+    if (isScheduled) {
+      await prisma.scheduled_campaigns.create({
+        data: {
+          campaign_id: newCampaign.id,
+          execute_at: new Date(body.execute_at),
+          status: 'pending'
+        }
+      })
+
+      return res.status(201).json({
+        success: true,
+        campaign: {
+          id: newCampaign.id,
+          name: newCampaign.name,
+          status: 'pending',
+          total: body.targets.length,
+          distribution_mode: isRoundRobin ? 'round_robin' : 'single',
+          lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
+        },
+        scheduledFor: body.execute_at
       })
     }
 
@@ -1275,6 +1302,83 @@ app.post('/api/admin/reset-user', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('Admin reset error:', e)
     res.status(500).json({ error: 'Error reseteando usuario' })
+  }
+})
+
+
+// CRON
+
+cron.schedule('* * * * *', async () => {
+  try {
+    const now = new Date()
+    const pending = await prisma.scheduled_campaigns.findMany({
+      where: {
+        status: 'pending',
+        execute_at: { lte: now }
+      }
+    })
+
+    if (pending.length === 0) return
+
+    console.log(`⏰ ${pending.length} campaña(s) programada(s) lista(s) para ejecutar`)
+
+    for (const sched of pending) {
+      const campaign = await prisma.campaigns.findUnique({
+        where: { id: sched.campaign_id }
+      })
+      if (!campaign || campaign.status !== 'pending') continue
+
+      // Marcar como processing para que otro tick no la agarre
+      await prisma.scheduled_campaigns.update({
+        where: { id: sched.id },
+        data: { status: 'processing' }
+      })
+
+      // Resolver líneas
+      let lineIds = []
+      try {
+        if (campaign.selected_lines) lineIds = JSON.parse(campaign.selected_lines)
+      } catch (e) {}
+      if (lineIds.length === 0 && campaign.line_id) lineIds = [campaign.line_id]
+
+      const lineasSeleccionadas = await prisma.lineas_whatsapp.findMany({
+        where: { id: { in: lineIds }, status: 'CONECTADA' }
+      })
+
+      if (lineasSeleccionadas.length === 0) {
+        await prisma.scheduled_campaigns.update({
+          where: { id: sched.id },
+          data: { status: 'failed' }
+        })
+        continue
+      }
+
+      // Marcar running y disparar
+      await prisma.campaigns.update({
+        where: { id: campaign.id },
+        data: { status: 'running' }
+      }).catch(() => {})
+
+      waService.sendCampaign(campaign.id, lineasSeleccionadas, campaign.targets, campaign.message, {
+        delayMin: 5000,
+        delayMax: 12000,
+        imageUrl: campaign.image_url,
+        humanMode: campaign.human_mode === true
+      }).then(async () => {
+        await prisma.scheduled_campaigns.update({
+          where: { id: sched.id },
+          data: { status: 'completed' }
+        }).catch(() => {})
+      }).catch(async (err) => {
+        console.error('❌ Scheduled campaign failed:', err)
+        await prisma.scheduled_campaigns.update({
+          where: { id: sched.id },
+          data: { status: 'failed' }
+        }).catch(() => {})
+      })
+    }
+  } catch (e) {
+    console.error('⏰ Error cron scheduled campaigns:', e)
   }
 })
 
