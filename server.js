@@ -982,7 +982,7 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
         distribution_mode: isRoundRobin ? 'round_robin' : 'single',
         line_id: lineasSeleccionadas[0]?.id || '',
         selected_lines: JSON.stringify(lineasSeleccionadas.map(l => l.id)),
-        user_id: userId || null
+        // user_id: userId || null
       }
     })
 
