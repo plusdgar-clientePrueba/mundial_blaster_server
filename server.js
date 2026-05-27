@@ -602,10 +602,21 @@ app.get('/api/campaigns/report', authOrSecret, async (req, res) => {
     })
     
     // Stats agregadas
+        // Stats agregadas
     const totalSent = campaigns.reduce((sum, c) => sum + (c.sent || 0), 0)
     const totalFailed = campaigns.reduce((sum, c) => sum + (c.failed || 0), 0)
     const totalMessages = totalSent + totalFailed
     const deliveryRate = totalMessages > 0 ? Math.round((totalSent / totalMessages) * 100) : 0
+
+    // Contactos únicos alcanzados (desde logs, no duplicados)
+    const allLogs = await prisma.campaign_logs.findMany({
+      where: {
+        campaign_id: { in: campaigns.map(c => c.id) },
+        status: 'sent'
+      },
+      select: { contact_phone: true }
+    })
+    const uniqueDelivered = new Set(allLogs.map(l => l.contact_phone)).size
     
     // Datos para gráfico por día
     const dailyData = {}
@@ -634,7 +645,8 @@ app.get('/api/campaigns/report', authOrSecret, async (req, res) => {
         totalFailed,
         totalMessages,
         deliveryRate,
-        activeNow: campaigns.filter(c => c.status === 'running').length
+        activeNow: campaigns.filter(c => c.status === 'running').length,
+        uniqueDelivered
       },
       chartData
     })
@@ -1003,52 +1015,13 @@ app.post('/api/campaigns/send', authOrSecret, requireLicense, async (req, res) =
       })
     }
 
-    // ─── ENVIAR AHORA: disparar en background ───
-    const sendOptions = {
+        const sendOptions = {
       delayMin: body.delay_min || 8000,
       delayMax: body.delay_max || 15000,
       imageUrl: body.image_url || null
     }
 
     waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), sendOptions)
-      .then(() => console.log(`✅ Campaña ${newCampaign.id} finalizada`))
-      .catch(err => console.error(`❌ Campaña ${newCampaign.id} falló:`, err))
-
-    res.status(201).json({
-      success: true,
-      campaign: {
-        id: newCampaign.id,
-        name: newCampaign.name,
-        status: 'running',
-        total: body.targets.length,
-        distribution_mode: isRoundRobin ? 'round_robin' : 'single',
-        lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
-      }
-    })
-
-    // ─── SI ES SCHEDULED: SOLO GUARDAR, NO DISPARAR ───
-    if (isScheduled) {
-      return res.status(201).json({
-        success: true,
-        campaign: {
-          id: newCampaign.id,
-          name: newCampaign.name,
-          status: 'scheduled',
-          total: body.targets.length,
-          distribution_mode: isRoundRobin ? 'round_robin' : 'single',
-          lines: lineasSeleccionadas.map(l => ({ id: l.id, phone: l.phone, nombre: l.nombre }))
-        }
-      })
-    }
-
-    // ─── SI ES NOW: DISPARAR EN BACKGROUND ───
-    const options = {
-      delayMin: body.delay_min || 8000,
-      delayMax: body.delay_max || 15000,
-      imageUrl: body.image_url || null
-    }
-
-    waService.sendCampaign(newCampaign.id, lineasSeleccionadas, body.targets, body.message.trim(), options)
       .then(() => console.log(`✅ Campaña ${newCampaign.id} finalizada`))
       .catch(err => console.error(`❌ Campaña ${newCampaign.id} falló:`, err))
 
@@ -1138,9 +1111,10 @@ app.post('/api/campaigns/:id/start', authOrSecret, async (req, res) => {
     }).catch(() => {})
 
     // Disparar fire & forget
+        // Disparar fire & forget (delay mínimo 5s para no parecer spam)
     waService.sendCampaign(campaign.id, lineasSeleccionadas, targets, campaign.message, {
-      delayMin: 3000,
-      delayMax: 8000,
+      delayMin: 5000,
+      delayMax: 12000,
       imageUrl: campaign.image_url
     }).catch(console.error)
 
