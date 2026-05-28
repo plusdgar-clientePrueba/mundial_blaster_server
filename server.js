@@ -749,15 +749,118 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
   }
 })
 
-app.delete('/api/campaigns/:id', authOrSecret, async (req, res) => {
+app.delete('/api/campaigns/:id', authOrSecret, requireLicense, async (req, res) => {
   try {
-    
-    await prisma.campaigns.delete({ where: { id: req.params.id } })
-    await prisma.campaign_logs.deleteMany({ where: { campaign_id: req.params.id } })
+    const { id } = req.params
+    const userId = req.user?.id || req.userId
+
+    const campaign = await prisma.campaigns.findFirst({
+      where: { id, user_id: userId }
+    })
+
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
+    if (campaign.status === 'running') return res.status(400).json({ error: 'No se puede eliminar una campaña en ejecución. Parala primero.' })
+
+    // Transaction atómica: logs primero (evita FK huérfanos), luego campaña
+    await prisma.$transaction([
+      prisma.campaign_logs.deleteMany({ where: { campaign_id: id } }),
+      prisma.campaigns.delete({ where: { id } })
+    ])
+
     res.json({ success: true })
   } catch (e) {
     console.error('Error delete campaign:', e)
     res.status(500).json({ error: 'Error eliminando campaña' })
+  }
+})
+
+
+
+app.get('/api/campaigns/:id/export', authOrSecret, async (req, res) => {
+  try {
+    const { id } = req.params
+
+    // Verificar tier Pro
+    const user = await prisma.users.findFirst()
+    const tier = user?.tier || 'starter'
+    if (tier !== 'pro' && tier !== 'business') {
+      return res.status(403).json({ error: 'Requiere plan Pro' })
+    }
+
+    const campaign = await prisma.campaigns.findUnique({
+      where: { id },
+      include: { campaign_logs: true }
+    })
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
+
+    const validPhones = campaign.campaign_logs
+      .filter(log => log.status === 'sent')
+      .map(log => log.contact_phone?.replace(/\D/g, ''))
+      .filter(Boolean)
+
+    const unique = [...new Set(validPhones)]
+    const csv = 'telefono\n' + unique.join('\n')
+
+    res.setHeader('Content-Type', 'text/csv')
+    res.setHeader('Content-Disposition', `attachment; filename="campana_${id}_validos.csv"`)
+    res.send(csv)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Error exportando' })
+  }
+})
+
+
+// Obtener campaña completa para edición
+app.get('/api/campaigns/:id', authOrSecret, async (req, res) => {
+  try {
+    const campaign = await prisma.campaigns.findUnique({
+      where: { id: req.params.id }
+    })
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
+    res.json({ campaign })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Error obteniendo campaña' })
+  }
+})
+
+// Guardar edición de campaña pendiente/programada
+app.patch('/api/campaigns/:id', authOrSecret, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { name, message, targets, image_url, delay_min, delay_max, line_ids, schedule } = req.body
+
+    const existing = await prisma.campaigns.findUnique({ where: { id } })
+    if (!existing) return res.status(404).json({ error: 'No encontrada' })
+    if (existing.status === 'running' || existing.status === 'completed') {
+      return res.status(400).json({ error: 'Solo se pueden editar campañas pendientes o programadas' })
+    }
+
+    const updateData = {}
+    if (name !== undefined) updateData.name = name
+    if (message !== undefined) updateData.message = message
+    if (targets !== undefined) {
+      updateData.targets = targets
+      updateData.total = targets.length
+      updateData.sent = 0
+      updateData.failed = 0
+    }
+    if (image_url !== undefined) updateData.image_url = image_url
+    if (delay_min !== undefined) updateData.delay_min = delay_min
+    if (delay_max !== undefined) updateData.delay_max = delay_max
+    if (line_ids !== undefined) updateData.line_ids = line_ids
+    if (schedule !== undefined) updateData.schedule = schedule
+
+    const updated = await prisma.campaigns.update({
+      where: { id },
+      data: updateData
+    })
+
+    res.json({ success: true, campaign: updated })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Error actualizando campaña' })
   }
 })
 
