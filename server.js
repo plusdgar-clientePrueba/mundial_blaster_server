@@ -780,14 +780,17 @@ app.get('/api/campaigns/:id/export', authOrSecret, async (req, res) => {
   try {
     const { id } = req.params
 
-    const campaign = await prisma.campaigns.findUnique({
-      where: { id },
-      include: { campaign_logs: true }
-    })
+    // 1. Verificar que la campaña existe
+    const campaign = await prisma.campaigns.findUnique({ where: { id } })
     if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
 
-    const validPhones = campaign.campaign_logs
-      .filter(log => log.status === 'sent')
+    // 2. Buscar logs por campaign_id (sin include, query separada)
+    const logs = await prisma.campaign_logs.findMany({
+      where: { campaign_id: id, status: 'sent' },
+      select: { contact_phone: true }
+    })
+
+    const validPhones = logs
       .map(log => log.contact_phone?.replace(/\D/g, ''))
       .filter(Boolean)
 
