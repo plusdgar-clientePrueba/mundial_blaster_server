@@ -749,6 +749,8 @@ app.post('/api/campaigns/:id/clone', authOrSecret, async (req, res) => {
   }
 })
 
+
+
 app.delete('/api/campaigns/:id', authOrSecret, requireLicense, async (req, res) => {
   try {
     const { id } = req.params
@@ -780,25 +782,39 @@ app.get('/api/campaigns/:id/export', authOrSecret, async (req, res) => {
   try {
     const { id } = req.params
 
-    // 1. Verificar que la campaña existe
     const campaign = await prisma.campaigns.findUnique({ where: { id } })
     if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' })
 
-    // 2. Buscar logs por campaign_id (sin include, query separada)
+    // Traer TODOS los logs (sent + failed) para que el usuario vea el panorama completo
     const logs = await prisma.campaign_logs.findMany({
-      where: { campaign_id: id, status: 'sent' },
-      select: { contact_phone: true }
+      where: { campaign_id: id },
+      orderBy: { created_at: 'desc' }
     })
 
-    const validPhones = logs
-      .map(log => log.contact_phone?.replace(/\D/g, ''))
-      .filter(Boolean)
+    // Buscar nombres en contactos si existen
+    const phones = logs.map(l => l.contact_phone)
+    const contacts = await prisma.contacts.findMany({
+      where: { phone: { in: phones } },
+      select: { phone: true, name: true }
+    }).catch(() => [])
+    const contactMap = {}
+    contacts.forEach(c => contactMap[c.phone] = c.name)
 
-    const unique = [...new Set(validPhones)]
-    const csv = 'telefono\n' + unique.join('\n')
+    // Construir CSV con headers enriquecidos
+    const rows = logs.map(log => {
+      const phone = log.contact_phone?.replace(/\D/g, '') || ''
+      const name = (contactMap[log.contact_phone] || '').replace(/"/g, '""')
+      const msg = (campaign.message || '').replace(/"/g, '""')
+      const date = log.created_at ? new Date(log.created_at).toLocaleString('es-AR') : ''
+      const status = log.status
+      const line = log.line_id || ''
+      return `"${phone}","${name}","${msg}","${date}","${status}","${line}"`
+    })
 
-    res.setHeader('Content-Type', 'text/csv')
-    res.setHeader('Content-Disposition', `attachment; filename="campana_${id}_validos.csv"`)
+    const csv = 'telefono,nombre,mensaje,fecha_envio,estado,linea\n' + rows.join('\n')
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="campana_${id}_reporte.csv"`)
     res.send(csv)
   } catch (e) {
     console.error(e)
