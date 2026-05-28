@@ -780,13 +780,6 @@ app.get('/api/campaigns/:id/export', authOrSecret, async (req, res) => {
   try {
     const { id } = req.params
 
-    // Verificar tier Pro
-    const user = await prisma.users.findFirst()
-    const tier = user?.tier || 'starter'
-    if (tier !== 'pro' && tier !== 'business') {
-      return res.status(403).json({ error: 'Requiere plan Pro' })
-    }
-
     const campaign = await prisma.campaigns.findUnique({
       where: { id },
       include: { campaign_logs: true }
@@ -829,7 +822,7 @@ app.get('/api/campaigns/:id', authOrSecret, async (req, res) => {
 app.patch('/api/campaigns/:id', authOrSecret, async (req, res) => {
   try {
     const { id } = req.params
-    const { name, message, targets, image_url, delay_min, delay_max, line_ids, schedule } = req.body
+    const { name, message, targets, image_url, line_ids, schedule, execute_at } = req.body
 
     const existing = await prisma.campaigns.findUnique({ where: { id } })
     if (!existing) return res.status(404).json({ error: 'No encontrada' })
@@ -837,6 +830,7 @@ app.patch('/api/campaigns/:id', authOrSecret, async (req, res) => {
       return res.status(400).json({ error: 'Solo se pueden editar campañas pendientes o programadas' })
     }
 
+    // Solo campos que existen en tu schema actual
     const updateData = {}
     if (name !== undefined) updateData.name = name
     if (message !== undefined) updateData.message = message
@@ -847,20 +841,38 @@ app.patch('/api/campaigns/:id', authOrSecret, async (req, res) => {
       updateData.failed = 0
     }
     if (image_url !== undefined) updateData.image_url = image_url
-    if (delay_min !== undefined) updateData.delay_min = delay_min
-    if (delay_max !== undefined) updateData.delay_max = delay_max
-    if (line_ids !== undefined) updateData.line_ids = line_ids
-    if (schedule !== undefined) updateData.schedule = schedule
+    if (line_ids !== undefined) {
+      updateData.selected_lines = JSON.stringify(line_ids) // ← tu campo legacy es String JSON
+    }
+
+    // Status según scheduling
+    if (schedule === 'scheduled' && execute_at) {
+      updateData.status = 'scheduled'
+    } else if (schedule === 'pending') {
+      updateData.status = 'pending'
+    }
 
     const updated = await prisma.campaigns.update({
       where: { id },
       data: updateData
     })
 
+    // Manejar programación via tabla scheduled_campaigns (que sí existe en tu schema)
+    if (schedule === 'scheduled' && execute_at) {
+      await prisma.scheduled_campaigns.upsert({
+        where: { campaign_id: id },
+        update: { execute_at: new Date(execute_at), status: 'pending' },
+        create: { campaign_id: id, execute_at: new Date(execute_at), status: 'pending' }
+      })
+    } else if (schedule === 'pending') {
+      // Si deja de ser scheduled, limpiar
+      await prisma.scheduled_campaigns.deleteMany({ where: { campaign_id: id } }).catch(() => {})
+    }
+
     res.json({ success: true, campaign: updated })
   } catch (e) {
-    console.error(e)
-    res.status(500).json({ error: 'Error actualizando campaña' })
+    console.error('PATCH ERROR:', e)
+    res.status(500).json({ error: e.message || 'Error actualizando campaña' })
   }
 })
 
