@@ -227,11 +227,74 @@ class WAService {
     })
 
     // 3. Mensajes entrantes: ignoramos todo (modo emisor puro)
+        // 3. Mensajes entrantes: TRACKING DE RESPUESTAS
     waClient.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return
       for (const msg of messages) {
         if (!msg.message || msg.key.fromMe) continue
-        // Modo emisor puro: no procesamos nada entrante
+
+        const from = msg.key.remoteJid?.replace('@s.whatsapp.net', '')
+        if (!from) continue
+
+        // Buscar si este número fue destinatario de una campaña reciente (últimos 30 días)
+        const recentLog = await this.prisma.campaign_logs.findFirst({
+          where: {
+            contact_phone: from,
+            status: 'sent',
+            created_at: { gte: new Date(Date.now() - 30 * 86400000) }
+          },
+          orderBy: { created_at: 'desc' }
+        })
+
+        if (recentLog && !recentLog.has_reply) {
+          await this.prisma.campaign_logs.update({
+            where: { id: recentLog.id },
+            data: { has_reply: true, replied_at: new Date() }
+          })
+
+          // Emitir al frontend en vivo
+          this.io.emit('campaign_reply', {
+            campaign_id: recentLog.campaign_id,
+            phone: from,
+            message: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '',
+            timestamp: new Date()
+          })
+        }
+      }
+    })
+
+    // 4. Delivery & Read receipts: TRACKING DE APERTURA
+    waClient.ev.on('messages.update', async (updates) => {
+      for (const update of updates) {
+        const { key, update: statusUpdate } = update
+        if (!key.id || !key.remoteJid) continue
+
+        const phone = key.remoteJid.replace('@s.whatsapp.net', '')
+
+        // Buscar el log más reciente de este número
+        const log = await this.prisma.campaign_logs.findFirst({
+          where: { contact_phone: phone },
+          orderBy: { created_at: 'desc' }
+        })
+
+        if (!log) continue
+
+        // ack: 1 = sent, 2 = delivered, 3 = read, 4 = played
+        const ack = statusUpdate?.status || statusUpdate?.ack
+
+        if (ack === 2 && !log.delivered_at) {
+          await this.prisma.campaign_logs.update({
+            where: { id: log.id },
+            data: { delivered_at: new Date() }
+          })
+        }
+
+        if (ack === 3 && !log.read_at) {
+          await this.prisma.campaign_logs.update({
+            where: { id: log.id },
+            data: { read_at: new Date() }
+          })
+        }
       }
     })
   }
@@ -240,6 +303,9 @@ class WAService {
     if (!jid) return ''
     return jid.split('@')[0].split(':')[0].replace(/\D/g, '')
   }
+
+
+
 
   
 
