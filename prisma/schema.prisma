@@ -84,8 +84,16 @@ model campaign_attachments {
     error         String?     // ← NUEVO: para guardar mensaje de error
     sent_at       DateTime?
     created_at    DateTime  @default(now())
+    message_id    String?
     
+    has_reply     Boolean   @default(false)
+    replied_at    DateTime?
+    delivered_at DateTime?
+    read_at       DateTime?
+  
+  
     @@index([campaign_id])
+    @@index([contact_phone])
     @@index([created_at])
 }
 
